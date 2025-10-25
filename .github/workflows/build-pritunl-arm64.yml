@@ -38,6 +38,9 @@ jobs:
             build-essential \
             gcc \
             g++ \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            crossbuild-essential-arm64 \
             git \
             wget \
             curl \
@@ -45,20 +48,23 @@ jobs:
             debhelper \
             devscripts \
             dh-python \
+            qemu-user-static \
+            binfmt-support \
             python3-all \
             python3-dev \
             python3-pip \
             python3-setuptools \
-            python3-distutils \
             golang-go \
             libssl-dev \
             zlib1g-dev \
             ca-certificates
 
-      - name: Verify ARM64 architecture
+      - name: Setup cross-compilation environment
         run: |
-          echo "Architecture: $(uname -m)"
-          dpkg --print-architecture
+          echo "Host Architecture: $(uname -m)"
+          echo "Target Architecture: arm64"
+          dpkg --add-architecture arm64
+          sudo update-binfmts --enable qemu-aarch64
 
       - name: Install Go ${{ env.GO_VERSION }}
         run: |
@@ -69,19 +75,36 @@ jobs:
           export PATH=$PATH:/usr/local/go/bin
           go version
 
-      - name: Build pritunl-dns
+      - name: Build pritunl-dns for ARM64
         run: |
           export PATH=$PATH:/usr/local/go/bin
-          go install -v github.com/pritunl/pritunl-dns@latest
-          sudo cp ~/go/bin/pritunl-dns /usr/bin/pritunl-dns
-          sudo chmod +x /usr/bin/pritunl-dns
+          export GOOS=linux
+          export GOARCH=arm64
+          export CGO_ENABLED=1
+          export CC=aarch64-linux-gnu-gcc
+          export CXX=aarch64-linux-gnu-g++
+          
+          mkdir -p ~/go/bin
+          cd /tmp
+          git clone https://github.com/pritunl/pritunl-dns.git
+          cd pritunl-dns
+          go build -v -o ~/go/bin/pritunl-dns
+          file ~/go/bin/pritunl-dns
 
-      - name: Build pritunl-web
+      - name: Build pritunl-web for ARM64
         run: |
           export PATH=$PATH:/usr/local/go/bin
-          go install -v github.com/pritunl/pritunl-web@latest
-          sudo cp ~/go/bin/pritunl-web /usr/bin/pritunl-web
-          sudo chmod +x /usr/bin/pritunl-web
+          export GOOS=linux
+          export GOARCH=arm64
+          export CGO_ENABLED=1
+          export CC=aarch64-linux-gnu-gcc
+          export CXX=aarch64-linux-gnu-g++
+          
+          cd /tmp
+          git clone https://github.com/pritunl/pritunl-web.git
+          cd pritunl-web
+          go build -v -o ~/go/bin/pritunl-web
+          file ~/go/bin/pritunl-web
 
       - name: Download Pritunl source
         run: |
@@ -129,10 +152,11 @@ jobs:
       - name: Copy cross-compiled binaries to package
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
-          cp ../build/bin/pritunl-dns debian/usr/bin/
-          cp ../build/bin/pritunl-web debian/usr/bin/
+          cp ~/go/bin/pritunl-dns debian/usr/bin/
+          cp ~/go/bin/pritunl-web debian/usr/bin/
           chmod +x debian/usr/bin/pritunl*
           
+          echo "Verifying ARM64 binaries:"
           file debian/usr/bin/pritunl-dns
           file debian/usr/bin/pritunl-web
 
