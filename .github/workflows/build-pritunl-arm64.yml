@@ -63,7 +63,7 @@ jobs:
         run: |
           echo "Host Architecture: $(uname -m)"
           echo "Target Architecture: arm64"
-          dpkg --add-architecture arm64
+          sudo dpkg --add-architecture arm64
           sudo update-binfmts --enable qemu-aarch64
 
       - name: Install Go ${{ env.GO_VERSION }}
