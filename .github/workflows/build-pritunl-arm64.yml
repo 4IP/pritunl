@@ -1,4 +1,4 @@
-name: Build Pritunl ARM64 DEB Package
+name: Build Pritunl ARM64 DEB Package (Cross-Compile)
 
 on:
   push:
@@ -21,7 +21,7 @@ env:
 
 jobs:
   build-arm64-deb:
-    runs-on: ubuntu-24.04-arm64  # Native ARM64 runner
+    runs-on: ubuntu-latest  # Standard x64 runner
     
     strategy:
       matrix:
@@ -126,12 +126,15 @@ jobs:
           python3 setup.py build
           python3 setup.py install --root=debian --prefix=/usr
 
-      - name: Copy binaries to package
+      - name: Copy cross-compiled binaries to package
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
-          cp /usr/bin/pritunl-dns debian/usr/bin/
-          cp /usr/bin/pritunl-web debian/usr/bin/
+          cp ../build/bin/pritunl-dns debian/usr/bin/
+          cp ../build/bin/pritunl-web debian/usr/bin/
           chmod +x debian/usr/bin/pritunl*
+          
+          file debian/usr/bin/pritunl-dns
+          file debian/usr/bin/pritunl-web
 
       - name: Create systemd service
         run: |
