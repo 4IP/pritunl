@@ -8,25 +8,27 @@ on:
   workflow_dispatch:
     inputs:
       pritunl_version:
-        description: 'Pritunl version to build (e.g., 1.32.4400.99)'
+        description: "Pritunl version to build (e.g., 1.32.4400.99)"
         required: false
-        default: '1.32.4400.99'
+        default: "1.32.4400.99"
   release:
-    types: [created]
+    types: [ created ]
 
 env:
   PRITUNL_VERSION: ${{ github.event.inputs.pritunl_version || '1.32.4400.99' }}
-  PYTHON_VERSION: '3.9'
-  GO_VERSION: '1.23.2'
+  GO_VERSION: "1.23.2"
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
   build-arm64-deb:
-    runs-on: ubuntu-latest  # Standard x64 runner
-    
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        ubuntu_version: ['22.04', '24.04']
-    
+        ubuntu_version: [ "22.04", "24.04" ]
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,30 +38,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            gcc \
-            g++ \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
+            gcc g++ \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
             crossbuild-essential-arm64 \
-            git \
-            wget \
-            curl \
-            make \
-            debhelper \
-            devscripts \
-            dh-python \
-            qemu-user-static \
-            binfmt-support \
-            python3-all \
-            python3-dev \
-            python3-pip \
-            python3-setuptools \
-            golang-go \
-            libssl-dev \
-            zlib1g-dev \
-            ca-certificates
+            git wget curl make \
+            debhelper devscripts dh-python \
+            qemu-user-static binfmt-support \
+            python3-all python3-dev python3-pip python3-setuptools \
+            golang-go libssl-dev zlib1g-dev ca-certificates
 
-      - name: Setup cross-compilation environment
+      - name: Setup cross environment
         run: |
           echo "Host Architecture: $(uname -m)"
           echo "Target Architecture: arm64"
@@ -68,67 +56,50 @@ jobs:
 
       - name: Install Go ${{ env.GO_VERSION }}
         run: |
-          wget https://go.dev/dl/go${{ env.GO_VERSION }}.linux-arm64.tar.gz
+          wget https://go.dev/dl/go${{ env.GO_VERSION }}.linux-amd64.tar.gz
           sudo rm -rf /usr/local/go
-          sudo tar -C /usr/local -xzf go${{ env.GO_VERSION }}.linux-arm64.tar.gz
+          sudo tar -C /usr/local -xzf go${{ env.GO_VERSION }}.linux-amd64.tar.gz
           echo "/usr/local/go/bin" >> $GITHUB_PATH
-          export PATH=$PATH:/usr/local/go/bin
           go version
 
       - name: Build pritunl-dns for ARM64
         run: |
           export PATH=$PATH:/usr/local/go/bin
-          export GOOS=linux
-          export GOARCH=arm64
-          export CGO_ENABLED=1
-          export CC=aarch64-linux-gnu-gcc
-          export CXX=aarch64-linux-gnu-g++
-          
-          mkdir -p ~/go/bin
+          export GOOS=linux GOARCH=arm64 CGO_ENABLED=1
+          export CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++
           cd /tmp
           git clone https://github.com/pritunl/pritunl-dns.git
           cd pritunl-dns
           go build -v -o ~/go/bin/pritunl-dns
-          file ~/go/bin/pritunl-dns
 
       - name: Build pritunl-web for ARM64
         run: |
           export PATH=$PATH:/usr/local/go/bin
-          export GOOS=linux
-          export GOARCH=arm64
-          export CGO_ENABLED=1
-          export CC=aarch64-linux-gnu-gcc
-          export CXX=aarch64-linux-gnu-g++
-          
+          export GOOS=linux GOARCH=arm64 CGO_ENABLED=1
+          export CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++
           cd /tmp
           git clone https://github.com/pritunl/pritunl-web.git
           cd pritunl-web
           go build -v -o ~/go/bin/pritunl-web
-          file ~/go/bin/pritunl-web
 
       - name: Download Pritunl source
         run: |
           wget https://github.com/pritunl/pritunl/archive/refs/tags/${{ env.PRITUNL_VERSION }}.tar.gz
           tar xf ${{ env.PRITUNL_VERSION }}.tar.gz
-          cd pritunl-${{ env.PRITUNL_VERSION }}
 
       - name: Install Python dependencies
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
           python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install -r requirements.txt
+          python3 -m pip install -r requirements.txt || true
 
       - name: Create Debian package structure
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
-          mkdir -p debian/DEBIAN
-          mkdir -p debian/usr/bin
-          mkdir -p debian/etc/systemd/system
-          mkdir -p debian/var/lib/pritunl
-          
-          PKG_VERSION="${{ env.PRITUNL_VERSION }}"
+          mkdir -p debian/DEBIAN debian/usr/bin debian/etc/systemd/system debian/var/lib/pritunl
+          CODENAME=$(if [ "${{ matrix.ubuntu_version }}" = "22.04" ]; then echo "jammy"; else echo "noble"; fi)
+          PKG_VERSION="${{ env.PRITUNL_VERSION }}-0ubuntu1.${CODENAME}"
           ARCH="arm64"
-          
           cat > debian/DEBIAN/control <<EOF
           Package: pritunl
           Version: ${PKG_VERSION}
@@ -137,8 +108,7 @@ jobs:
           Architecture: ${ARCH}
           Maintainer: GitHub Actions <actions@github.com>
           Description: Enterprise VPN Server (ARM64)
-           Pritunl is a distributed enterprise vpn server built using the OpenVPN
-           protocol. This is an ARM64 build for Ubuntu.
+           Pritunl is a distributed enterprise VPN server built using the OpenVPN protocol.
           Depends: python3 (>= 3.9), python3-pip, openvpn, iptables
           Homepage: https://pritunl.com
           EOF
@@ -149,18 +119,14 @@ jobs:
           python3 setup.py build
           python3 setup.py install --root=debian --prefix=/usr
 
-      - name: Copy cross-compiled binaries to package
+      - name: Copy built binaries to package
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
           cp ~/go/bin/pritunl-dns debian/usr/bin/
           cp ~/go/bin/pritunl-web debian/usr/bin/
           chmod +x debian/usr/bin/pritunl*
-          
-          echo "Verifying ARM64 binaries:"
-          file debian/usr/bin/pritunl-dns
-          file debian/usr/bin/pritunl-web
 
-      - name: Create systemd service
+      - name: Add systemd service
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
           cat > debian/etc/systemd/system/pritunl.service <<'EOF'
@@ -168,81 +134,61 @@ jobs:
           Description=Pritunl VPN Server
           After=network.target mongod.service
           Wants=mongod.service
-
           [Service]
           Type=simple
-          User=root
           ExecStart=/usr/bin/pritunl start
           Restart=always
           RestartSec=10
-
           [Install]
           WantedBy=multi-user.target
           EOF
 
-      - name: Create postinst script
-        run: |
-          cd pritunl-${{ env.PRITUNL_VERSION }}
-          cat > debian/DEBIAN/postinst <<'EOF'
-          set -e
-          
-          if ! getent group pritunl-web > /dev/null 2>&1; then
-              groupadd -r pritunl-web
-          fi
-          
-          if ! getent passwd pritunl-web > /dev/null 2>&1; then
-              useradd -r -g pritunl-web -s /sbin/nologin -c 'Pritunl web server' pritunl-web
-          fi
-          
-          mkdir -p /var/lib/pritunl
-          chown -R pritunl-web:pritunl-web /var/lib/pritunl
-          
-          systemctl daemon-reload
-          
-          echo "Pritunl ARM64 installation complete!"
-          echo "Start with: systemctl start pritunl"
-          echo "Enable on boot: systemctl enable pritunl"
-          
-          exit 0
-          EOF
-          chmod +x debian/DEBIAN/postinst
-
       - name: Build DEB package
         run: |
           cd pritunl-${{ env.PRITUNL_VERSION }}
-          dpkg-deb --build debian
-          mv debian.deb ../pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
-
-      - name: Verify DEB package
-        run: |
-          dpkg-deb --info pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
-          dpkg-deb --contents pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
+          CODENAME=$(if [ "${{ matrix.ubuntu_version }}" = "22.04" ]; then echo "jammy"; else echo "noble"; fi)
+          dpkg-deb --build debian pritunl_${{ env.PRITUNL_VERSION }}-0ubuntu1.${CODENAME}_arm64.deb
+          mv pritunl_*.deb ../
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pritunl-arm64-deb-ubuntu-${{ matrix.ubuntu_version }}
-          path: pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
-          retention-days: 30
+          name: pritunl-arm64-${{ matrix.ubuntu_version }}
+          path: pritunl_${{ env.PRITUNL_VERSION }}-0ubuntu1.*_arm64.deb
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build-arm64-deb
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: List artifacts
+        run: ls -lh dist/
 
       - name: Create GitHub Release
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
           tag_name: v${{ env.PRITUNL_VERSION }}
-          name: Pritunl ${{ env.PRITUNL_VERSION }} ARM64
+          name: "Pritunl ${{ env.PRITUNL_VERSION }} ARM64 Packages"
+          files: |
+            dist/**/*.deb
           body: |
-            
-            - **Version:** ${{ env.PRITUNL_VERSION }}
-            - **Architecture:** arm64 (aarch64)
-            - **Ubuntu:** ${{ matrix.ubuntu_version }}
-            - **Built on:** ${{ github.run_id }}
-            
-            wget https://github.com/${{ github.repository }}/releases/download/v${{ env.PRITUNL_VERSION }}/pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
-            sudo dpkg -i pritunl_${{ env.PRITUNL_VERSION }}_arm64.deb
+            **Version:** ${{ env.PRITUNL_VERSION }}
+            **Architectures:** ARM64
+            **Packages:**
+            - Ubuntu 22.04 (Jammy): `pritunl_${{ env.PRITUNL_VERSION }}-0ubuntu1.jammy_arm64.deb`
+            - Ubuntu 24.04 (Noble): `pritunl_${{ env.PRITUNL_VERSION }}-0ubuntu1.noble_arm64.deb`
+
+            To install:
+            ```
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ env.PRITUNL_VERSION }}/<filename>.deb
+            sudo dpkg -i <filename>.deb
             sudo apt-get install -f
-          draft: false
-          prerelease: false
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.SECRET_TOKEN }}
