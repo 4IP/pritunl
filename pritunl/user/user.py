@@ -263,6 +263,7 @@ class User(mongo.MongoObject):
                     temp_path,
                     ca_cert_path,
                     ca_key_path,
+                    settings.user.cert_expire_days,
                     settings.user.cert_message_digest,
                 ))
 
@@ -349,6 +350,126 @@ class User(mongo.MongoObject):
         if block:
             self.load()
 
+    def renew(self):
+        temp_path = utils.get_temp_path()
+        index_path = os.path.join(temp_path, INDEX_NAME)
+        index_attr_path = os.path.join(temp_path, INDEX_ATTR_NAME)
+        serial_path = os.path.join(temp_path, SERIAL_NAME)
+        ssl_conf_path = os.path.join(temp_path, OPENSSL_NAME)
+        reqs_path = os.path.join(temp_path, '%s.csr' % self.id)
+        key_path = os.path.join(temp_path, '%s.key' % self.id)
+        cert_path = os.path.join(temp_path, '%s.crt' % self.id)
+        ca_name = self.id if self.type == CERT_CA else 'ca'
+        ca_cert_path = os.path.join(temp_path, '%s.crt' % ca_name)
+        ca_key_path = os.path.join(temp_path, '%s.key' % ca_name)
+
+        self.org.queue_com.wait_status()
+
+        try:
+            os.makedirs(temp_path)
+
+            with open(index_path, 'a'):
+                os.utime(index_path, None)
+
+            with open(index_attr_path, 'a'):
+                os.utime(index_attr_path, None)
+
+            with open(serial_path, 'w') as serial_file:
+                serial_hex = ('%x' % utils.fnv64a(str(self.id))).upper()
+
+                if len(serial_hex) % 2:
+                    serial_hex = '0' + serial_hex
+
+                serial_file.write('%s\n' % serial_hex)
+
+            with open(ssl_conf_path, 'w') as conf_file:
+                conf_file.write(CERT_CONF % (
+                    settings.user.cert_key_bits,
+                    settings.user.cert_message_digest,
+                    self.org.id,
+                    self.id,
+                    index_path,
+                    serial_path,
+                    temp_path,
+                    ca_cert_path,
+                    ca_key_path,
+                    settings.user.cert_expire_days,
+                    settings.user.cert_message_digest,
+                ))
+
+            self.org.queue_com.wait_status()
+
+            if self.type != CERT_CA:
+                self.org.write_file(
+                    'ca_certificate', ca_cert_path, chmod=0o600)
+                self.org.write_file(
+                    'ca_private_key', ca_key_path, chmod=0o600)
+
+            self.write_file('private_key', key_path, chmod=0o600)
+
+            try:
+                args = [
+                    'openssl', 'req', '-new', '-batch',
+                    '-config', ssl_conf_path,
+                    '-key', key_path,
+                    '-out', reqs_path,
+                    '-reqexts', '%s_req_ext' % self.type.replace(
+                        '_pool', ''),
+                ]
+                self.org.queue_com.popen(args)
+            except (OSError, ValueError):
+                logger.exception(
+                    'Failed to create user cert requests for renewal', 'user',
+                    org_id=self.org.id,
+                    user_id=self.id,
+                )
+                raise
+
+            try:
+                args = ['openssl', 'ca', '-batch']
+
+                if self.type == CERT_CA:
+                    args += ['-selfsign']
+
+                args += [
+                    '-config', ssl_conf_path,
+                    '-in', reqs_path,
+                    '-out', cert_path,
+                    '-extensions', '%s_ext' % self.type.replace('_pool', ''),
+                ]
+
+                self.org.queue_com.popen(args)
+            except (OSError, ValueError):
+                logger.exception('Failed to renew user cert', 'user',
+                    org_id=self.org.id,
+                    user_id=self.id,
+                )
+                raise
+            self.read_file('certificate', cert_path)
+        finally:
+            try:
+                utils.rmtree(temp_path)
+            except subprocess.CalledProcessError:
+                pass
+
+        self.org.queue_com.wait_status()
+
+    def queue_renew(self, block, priority=LOW):
+        if self.type in (CERT_SERVER_POOL, CERT_CLIENT_POOL):
+            queue.start('renew_user_pooled', block=block,
+                org_doc=self.org.export(), user_doc=self.export(),
+                priority=priority)
+        else:
+            retry = True
+            if self.type == CERT_CA:
+                retry = False
+
+            queue.start('renew_user', block=block, org_doc=self.org.export(),
+                user_doc=self.export(), priority=priority, retry=retry)
+
+        if block:
+            self.load()
+
     def remove(self):
         self.audit_collection.delete_many({
             'user_id': self.id,
@@ -395,7 +516,8 @@ class User(mongo.MongoObject):
                     ))
 
                 if resp.status_code != 200:
-                    logger.error('Google auth check request error', 'user',
+                    logger.error('Google auth check request error, ' +
+                        'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                         user_id=self.id,
                         user_name=self.name,
                         status_code=resp.status_code,
@@ -410,7 +532,8 @@ class User(mongo.MongoObject):
                 valid, google_groups = sso.verify_google(self.email,
                     skip_user=skip_user, skip_groups=skip_groups)
                 if not valid:
-                    logger.error('Google auth check failed', 'user',
+                    logger.error('Google auth check failed, ' +
+                        'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                         user_id=self.id,
                         user_name=self.name,
                     )
@@ -426,7 +549,8 @@ class User(mongo.MongoObject):
 
                 return True
             except:
-                logger.exception('Google auth check error', 'user',
+                logger.exception('Google auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -447,7 +571,8 @@ class User(mongo.MongoObject):
                 ))
 
                 if resp.status_code != 200:
-                    logger.error('Azure auth check request error', 'user',
+                    logger.error('Azure auth check request error, ' +
+                        'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                         user_id=self.id,
                         user_name=self.name,
                         status_code=resp.status_code,
@@ -458,7 +583,8 @@ class User(mongo.MongoObject):
                 if not partial or settings.app.sso_azure_connection_check:
                     valid, azure_groups = sso.verify_azure(self.name)
                     if not valid:
-                        logger.error('Azure auth check failed', 'user',
+                        logger.error('Azure auth check failed, check ' +
+                            'https://docs.pritunl.com/kb/vpn/outage', 'user',
                             user_id=self.id,
                             user_name=self.name,
                         )
@@ -474,7 +600,8 @@ class User(mongo.MongoObject):
 
                 return True
             except:
-                logger.exception('Azure auth check error', 'user',
+                logger.exception('Azure auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -495,7 +622,8 @@ class User(mongo.MongoObject):
                 ))
 
                 if resp.status_code != 200:
-                    logger.error('Auth0 auth check request error', 'user',
+                    logger.error('Auth0 auth check request error, ' +
+                        'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                         user_id=self.id,
                         user_name=self.name,
                         status_code=resp.status_code,
@@ -506,7 +634,8 @@ class User(mongo.MongoObject):
                 if not partial or settings.app.sso_authzero_connection_check:
                     valid, authzero_groups = sso.verify_authzero(self.name)
                     if not valid:
-                        logger.error('Auth0 auth check failed', 'user',
+                        logger.error('Auth0 auth check failed, check ' +
+                            'https://docs.pritunl.com/kb/vpn/outage', 'user',
                             user_id=self.id,
                             user_name=self.name,
                         )
@@ -522,7 +651,8 @@ class User(mongo.MongoObject):
 
                 return True
             except:
-                logger.exception('Auth0 auth check error', 'user',
+                logger.exception('Auth0 auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -543,7 +673,8 @@ class User(mongo.MongoObject):
                     ))
 
                 if resp.status_code != 200:
-                    logger.error('Slack auth check request error', 'user',
+                    logger.error('Slack auth check request error, ' +
+                        'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                         user_id=self.id,
                         user_name=self.name,
                         status_code=resp.status_code,
@@ -553,7 +684,8 @@ class User(mongo.MongoObject):
 
                 return True
             except:
-                logger.exception('Slack auth check error', 'user',
+                logger.exception('Slack auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -565,7 +697,8 @@ class User(mongo.MongoObject):
             try:
                 return sso.auth_onelogin(self.name)
             except:
-                logger.exception('OneLogin auth check error', 'user',
+                logger.exception('OneLogin auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -577,7 +710,8 @@ class User(mongo.MongoObject):
             try:
                 return sso.auth_jumpcloud(self.name)
             except:
-                logger.exception('JumpCloud auth check error', 'user',
+                logger.exception('JumpCloud auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -589,7 +723,8 @@ class User(mongo.MongoObject):
             try:
                 return sso.auth_okta(self.name)
             except:
-                logger.exception('Okta auth check error', 'user',
+                logger.exception('Okta auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -605,7 +740,8 @@ class User(mongo.MongoObject):
             try:
                 return sso.verify_radius(self.name, password)[0]
             except:
-                logger.exception('Radius auth check error', 'user',
+                logger.exception('Radius auth check error, ' +
+                    'check https://docs.pritunl.com/kb/vpn/outage', 'user',
                     user_id=self.id,
                     user_name=self.name,
                 )
@@ -707,11 +843,16 @@ class User(mongo.MongoObject):
         })
 
     def _get_password_mode(self, svr):
-        if svr.sso_auth:
-            return None
-
         modes = self.get_auth_modes(svr)
         password_mode = None
+
+        if svr.bypass_sso_auth:
+            if PIN in modes:
+                password_mode = 'pin'
+            return password_mode
+
+        if svr.sso_auth:
+            return password_mode
 
         if DUO_PASSCODE in modes:
             password_mode = 'duo_otp'
@@ -866,6 +1007,7 @@ class User(mongo.MongoObject):
             'sync_hosts': svr.get_sync_remotes(),
             'sync_hash': conf_hash,
             'hide_ovpn': svr.hide_ovpn,
+            'ovpn_dco': svr.ovpn_dco,
             'dynamic_firewall': svr.dynamic_firewall,
             'geo_sort': geo_sort,
             'force_connect': svr.force_connect,
@@ -896,7 +1038,7 @@ class User(mongo.MongoObject):
             data, indent=1, separators=(",", ": ")
         ).replace("\n", "\n#")
 
-    def _generate_conf(self, svr, include_user_cert=True):
+    def _generate_conf(self, svr, include_user_cert=True, version=0):
         if not self.sync_token or not self.sync_secret:
             self.sync_token = utils.generate_secret()
             self.sync_secret = utils.generate_secret()
@@ -906,19 +1048,26 @@ class User(mongo.MongoObject):
             self.org.name, self.name, svr.name)
         if not svr.ca_certificate:
             svr.generate_ca_cert()
+            svr.commit('ca_certificate')
         key_remotes, remotes_data = svr.get_key_remotes()
         ca_certificate = svr.ca_certificate
         certificate = utils.get_cert_block(self.certificate)
         private_key = self.private_key.strip()
 
+        if svr.ovpn_dco:
+            ciphers = CIPHERS_DCO
+        else:
+            ciphers = CIPHERS
+
         conf_hash = utils.unsafe_md5()
+        conf_hash.update(str(version).encode())
         conf_hash.update(self.name.encode())
         conf_hash.update(self.org.name.encode())
         conf_hash.update(svr.name.encode())
         conf_hash.update(svr.protocol.encode())
         for key_remote in sorted(key_remotes):
             conf_hash.update(key_remote.encode())
-        conf_hash.update(CIPHERS[svr.cipher].encode())
+        conf_hash.update(ciphers[svr.cipher].encode())
         conf_hash.update(HASHES[svr.hash].encode())
         conf_hash.update(str(svr.lzo_compression).encode())
         conf_hash.update(str(svr.tun_mtu).encode())
@@ -930,6 +1079,7 @@ class User(mongo.MongoObject):
         conf_hash.update(str(svr.ping_interval).encode())
         conf_hash.update(str(settings.vpn.server_poll_timeout).encode())
         conf_hash.update(ca_certificate.encode())
+        conf_hash.update(certificate.encode())
         conf_hash.update(self._get_key_info_str(svr, None,
             remotes_data, False).encode())
 
@@ -955,6 +1105,7 @@ class User(mongo.MongoObject):
                 server_network_start=svr.network_start,
                 server_network_stop=svr.network_end,
                 server_hide_ovpn=svr.hide_ovpn,
+                server_ovpn_dco=svr.ovpn_dco,
                 server_dynamic_firewall=svr.dynamic_firewall,
                 server_bypass_sso_auth=svr.bypass_sso_auth,
                 server_device_auth=svr.device_auth,
@@ -1001,14 +1152,14 @@ class User(mongo.MongoObject):
             svr.adapter_type,
             svr.adapter_type,
             key_remotes,
-            CIPHERS[svr.cipher],
+            ciphers[svr.cipher],
             HASHES[svr.hash],
             svr.ping_interval,
             svr.ping_timeout,
             settings.vpn.server_poll_timeout,
         )
 
-        if svr.lzo_compression != ADAPTIVE:
+        if svr.lzo_compression != ADAPTIVE and not svr.ovpn_dco:
             client_conf += 'comp-lzo no\n'
 
         if svr.tun_mtu:
@@ -1032,7 +1183,9 @@ class User(mongo.MongoObject):
                 client_conf += '<%s>\n%s\n</%s>\n' % (
                     tls_mode, svr.tls_auth_key, tls_mode)
 
-            client_conf += '<cert>\n%s\n</cert>\n' % certificate
+        client_conf += '<cert>\n%s\n</cert>\n' % certificate
+
+        if include_user_cert:
             client_conf += '<key>\n%s\n</key>\n' % private_key
 
         return file_name, client_conf, conf_hash
@@ -1266,11 +1419,11 @@ class User(mongo.MongoObject):
 
         return svr
 
-    def build_key_conf(self, server_id, include_user_cert=True):
+    def build_key_conf(self, server_id, include_user_cert=True, version=0):
         svr = self.get_server(server_id)
 
         conf_name, client_conf, conf_hash = self._generate_conf(svr,
-            include_user_cert)
+            include_user_cert, version)
 
         return {
             'name': conf_name,
@@ -1278,9 +1431,9 @@ class User(mongo.MongoObject):
             'hash': conf_hash,
         }
 
-    def sync_conf(self, server_id, conf_hash):
+    def sync_conf(self, server_id, conf_hash, version):
         try:
-            key = self.build_key_conf(server_id, False)
+            key = self.build_key_conf(server_id, False, version)
         except (NotFound, UserNotInServerGroups):
             return
 

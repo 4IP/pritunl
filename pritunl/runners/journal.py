@@ -23,6 +23,9 @@ def rotate():
         if os.path.exists(current_file):
             os.rename(current_file, next_file)
 
+    if os.path.exists(base_path):
+        os.rename(base_path, base_path + '.1')
+
 @interrupter
 def _journal_runner_thread():
     journal_queue = journal.journal_queue
@@ -37,6 +40,7 @@ def _journal_runner_thread():
                             event,
                             default=lambda x: str(x)
                         ).encode() + '\n'.encode())
+                        jfile.flush()
                         size = jfile.tell()
                     if size > settings.app.journal_rotate_size:
                         rotate()

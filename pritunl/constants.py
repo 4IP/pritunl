@@ -665,7 +665,7 @@ serial = %s
 new_certs_dir = %s
 certificate = %s
 private_key = %s
-default_days = 10000
+default_days = %d
 default_crl_days = 365
 default_md = %s
 policy = ca_policy
@@ -841,6 +841,10 @@ NETWORK_WG_IN_USE_MSG = 'Network WG address is already in use.'
 
 PORT_PROTOCOL_IN_USE = 'port_protocol_in_use'
 PORT_PROTOCOL_IN_USE_MSG = 'Port and protocol is already in use.'
+
+BYPASS_SSO_DEVICE_AUTH = 'bypass_sso_device_auth'
+BYPASS_SSO_DEVICE_AUTH_MSG = 'Bypass single sign-on requires ' \
+    'device authentication.'
 
 PING_INTERVAL_TOO_HIGH = 'ping_interval_too_high'
 PING_INTERVAL_TOO_HIGH_MSG = 'Ping interval must be at ' \
@@ -1040,6 +1044,15 @@ CIPHERS = {
     'aes256': 'cipher AES-256-CBC\ndata-ciphers AES-256-GCM:AES-256-CBC',
     'chacha20poly1205': 'cipher CHACHA20-POLY1305\ndata-ciphers CHACHA20-POLY1305',
 }
+CIPHERS_DCO = {
+    'none': 'cipher none',
+    'bf128': 'cipher AES-128-GCM\ndata-ciphers AES-128-GCM',
+    'bf256': 'cipher AES-256-GCM\ndata-ciphers AES-256-GCM',
+    'aes128': 'cipher AES-128-GCM\ndata-ciphers AES-128-GCM',
+    'aes192': 'cipher AES-256-GCM\ndata-ciphers AES-256-GCM',
+    'aes256': 'cipher AES-256-GCM\ndata-ciphers AES-256-GCM',
+    'chacha20poly1205': 'cipher CHACHA20-POLY1305\ndata-ciphers CHACHA20-POLY1305',
+}
 
 SERVER_CIPHERS_OLD = {
     'none': 'cipher none',
@@ -1058,6 +1071,15 @@ SERVER_CIPHERS = {
     'aes192': 'cipher AES-256-CBC\nncp-ciphers AES-256-GCM:AES-256-CBC',
     'aes256': 'cipher AES-256-CBC\nncp-ciphers AES-256-GCM:AES-256-CBC',
     'chacha20poly1205': 'cipher CHACHA20-POLY1305\nncp-ciphers CHACHA20-POLY1305',
+}
+SERVER_CIPHERS_DCO = {
+    'none': 'cipher none\nncp-disable',
+    'bf128': 'cipher AES-128-GCM',
+    'bf256': 'cipher AES-256-GCM',
+    'aes128': 'cipher AES-128-GCM',
+    'aes192': 'cipher AES-256-GCM',
+    'aes256': 'cipher AES-256-GCM',
+    'chacha20poly1205': 'cipher CHACHA20-POLY1305',
 }
 
 HASHES = {
@@ -1357,4 +1379,6 @@ BIND_PORT=%s
 INTERNAL_ADDRESS=%s
 SSL_CERT=%s
 SSL_KEY=%s
+WEB_STRICT=%s
+WEB_SECRET=%s
 """

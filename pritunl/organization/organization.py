@@ -121,6 +121,20 @@ class Organization(mongo.MongoObject):
         self.ca_private_key = ca_user.private_key
         self.ca_certificate = ca_user.certificate
 
+    def renew(self):
+        doc = user.User.collection.find_one({
+            'org_id': self.id,
+            'type': CERT_CA,
+        })
+
+        ca_user = user.User(self, doc=doc)
+
+        ca_user.renew()
+        ca_user.commit()
+
+        self.ca_private_key = ca_user.private_key
+        self.ca_certificate = ca_user.certificate
+
     def extract_ca_expire(self):
         pattern = r'Not After\s*:\s*(.+?)(?:\n|$)'
         match = re.search(pattern, self.ca_certificate, re.MULTILINE)
@@ -331,6 +345,27 @@ class Organization(mongo.MongoObject):
         for doc in cursor:
             yield user.User(self, doc=doc, fields=fields)
 
+    def iter_users_all(self):
+        spec = {
+            'org_id': self.id,
+            'type':  {
+                '$in': [
+                    CERT_CLIENT,
+                    CERT_SERVER,
+                    CERT_CLIENT_POOL,
+                    CERT_SERVER_POOL,
+                ],
+            },
+        }
+        total = user.User.collection.count_documents(spec)
+
+        def generate():
+            cursor = user.User.collection.find(spec)
+            for doc in cursor:
+                yield user.User(self, doc=doc)
+
+        return total, generate()
+
     def create_user_key_link(self, user_id, one_time=False):
         success = False
         for _ in range(256):
@@ -364,7 +399,7 @@ class Organization(mongo.MongoObject):
             'id': key_id,
             'key_url': '/key/%s.tar' % key_id,
             'key_zip_url': '/key/%s.zip' % key_id,
-            'key_onc_url': '/key_onc/%s.onc' % key_id,
+            'key_onc_url': '/key/%s.onc' % key_id,
             'view_url': '/k/%s' % short_id,
             'uri_url': '/ku/%s' % short_id,
         }

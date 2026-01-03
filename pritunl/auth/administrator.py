@@ -11,6 +11,7 @@ from pritunl import journal
 from pritunl import plugins
 from pritunl import sso
 from pritunl import database
+from pritunl import event
 
 import base64
 import os
@@ -477,6 +478,20 @@ def check_session(csrf_check):
         if not flask.session:
             return False
 
+        validated = flask.request.headers.get('PR-Validated', None)
+        if validated != 'true':
+            logger.error(
+                'Request missing external web server validation',
+                'auth',
+                path=flask.request.path,
+            )
+            journal.entry(
+                journal.ADMIN_AUTH_FAILURE,
+                remote_address=utils.get_remote_addr(),
+                event_long='Request session not validated by external web',
+            )
+            return False
+
         admin_id = utils.session_opt_str('admin_id')
         if not admin_id:
             journal.entry(
@@ -550,9 +565,6 @@ def check_session(csrf_check):
             )
             return False
 
-        flask.session['timestamp'] = int(utils.time_now())
-        utils.set_flask_sig()
-
     if administrator.disabled:
         journal.entry(
             journal.ADMIN_AUTH_FAILURE,
@@ -607,6 +619,16 @@ def reset_password():
 
     return DEFAULT_USERNAME, default_admin.default_password
 
+def disable_admin_api():
+    admin_collection = mongo.get_collection('administrators')
+    admin_collection.update_many(
+        {},
+        {'$set': {
+            'auth_api': False,
+        }},
+    )
+    event.Event(type=ADMINS_UPDATED)
+
 def iter_admins(fields=None):
     if fields:
         fields = {key: True for key in fields}
@@ -632,6 +654,11 @@ def new_admin(**kwargs):
     admin.commit()
 
     return admin
+
+def admin_api_count():
+    return Administrator.collection.count_documents({
+        'auth_api': True,
+    })
 
 def super_user_count():
     return Administrator.collection.count_documents({

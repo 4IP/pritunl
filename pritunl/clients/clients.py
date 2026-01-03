@@ -199,7 +199,9 @@ class Clients(object):
                         client_conf += 'push "redirect-gateway-ipv6 def1"\n'
                         client_conf += 'push "route-ipv6 2000::/3"\n'
 
+            has_dns = False
             if self.server.dns_mapping:
+                has_dns = True
                 client_conf += 'push "dhcp-option DNS %s"\n' % (
                     utils.get_network_gateway(self.server.network))
 
@@ -209,8 +211,12 @@ class Clients(object):
                     (settings.vpn.dns_mapping_push_all_apple and
                      platform in ('ios', 'mac')):
                 for dns_server in self.server.dns_servers:
+                    has_dns = True
                     client_conf += 'push "dhcp-option DNS %s"\n' % \
                         dns_server
+
+            if has_dns:
+                client_conf += 'push "dhcp-option DOMAIN-ROUTE ."\n'
 
             if self.server.search_domain:
                 domains = self.server.search_domain.split(',')
@@ -1674,7 +1680,8 @@ class Clients(object):
                             remote_ip,
                         )
 
-                        if self.server.sso_auth:
+                        if not self.server.bypass_sso_auth and \
+                                self.server.sso_auth:
                             conn_sso_token = utils.rand_str(32)
 
                             tokens_collection = mongo.get_collection(
@@ -2558,7 +2565,7 @@ class Clients(object):
                 self.instance_com.client_kill(client_id, "auth_lost_err")
             return
 
-        if usr.bypass_secondary or settings.vpn.stress_test:
+        if self.server.bypass_sso_auth or usr.bypass_secondary:
             return
 
         if not usr.sso_auth_check(self.server, client['password'],

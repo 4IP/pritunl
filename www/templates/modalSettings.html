@@ -208,6 +208,7 @@
         <option value="none" <%= cloud_provider === 'none' ? 'selected' : '' %>>None</option>
         <option value="aws" <%= cloud_provider === 'aws' ? 'selected' : '' %>>AWS</option>
         <option value="oracle" <%= cloud_provider === 'oracle' ? 'selected' : '' %>>Oracle</option>
+        <option value="pritunl" <%= cloud_provider === 'pritunl' ? 'selected' : '' %>>Pritunl Cloud</option>
       </select>
     </div>
     <div class="sso-okta-app-id form-group" <%= !sso || sso.indexOf('okta') === -1 ? 'style="display: none;"' : '' %>>
@@ -375,6 +376,7 @@
         <option value="ap-northeast-2" <%= route53_region === 'ap-northeast-2' ? 'selected' : '' %>>Asia Pacific (Seoul)</option>
         <option value="ap-southeast-1" <%= route53_region === 'ap-southeast-1' ? 'selected' : '' %>>Asia Pacific (Singapore)</option>
         <option value="ap-southeast-2" <%= route53_region === 'ap-southeast-2' ? 'selected' : '' %>>Asia Pacific (Sydney)</option>
+        <option value="ap-southeast-3" <%= route53_region === 'ap-southeast-3' ? 'selected' : '' %>>Asia Pacific (Jakarta)</option>
         <option value="ap-east-1" <%= route53_region === 'ap-east-1' ? 'selected' : '' %>>Asia Pacific (Hong Kong)</option>
         <option value="ap-south-1" <%= route53_region === 'ap-south-1' ? 'selected' : '' %>>Asia Pacific (Mumbai)</option>
         <option value="sa-east-1" <%= route53_region === 'sa-east-1' ? 'selected' : '' %>>South America (Sao Paulo)</option>
@@ -580,15 +582,33 @@
   </div>
 </div>
 </div>
+<div class="pritunl-settings layout-horizontal" <%= cloud_provider === 'pritunl' ? '' : 'style="display: none;"' %>>
+<div class="settings-left layout-flex left">
+  <div class="pritunl-cloud-token form-group">
+    <label>Pritunl Cloud Token</label>
+    <input type="text" class="form-control" placeholder="Enter token" data-toggle="tooltip" title="Enter the Pritunl Cloud API token" value="<%- pritunl_cloud_token || '' %>">
+  </div>
+  <div class="pritunl-cloud-host form-group">
+    <label>Pritunl Cloud Host</label>
+    <input type="text" class="form-control" placeholder="Enter hostname" data-toggle="tooltip" title="Enter the hostname of the Pritunl Cloud web console server" value="<%- pritunl_cloud_host || '' %>">
+  </div>
+</div>
+<div class="settings-right right">
+  <div class="pritunl-cloud-secret form-group">
+    <label>Pritunl Cloud Secret</label>
+    <input type="text" class="form-control" placeholder="Enter secret" data-toggle="tooltip" title="Enter the Pritunl Cloud API secret" value="<%- pritunl_cloud_secret || '' %>">
+  </div>
+</div>
+</div>
 <div class="layout-horizontal">
   <div class="settings-left layout-flex left advanced">
     <div class="email-from form-group">
       <label>SMTP From Address</label>
-      <input type="email" class="form-control" placeholder="Enter SMTP from address" value="<%- email_from || '' %>" data-toggle="tooltip" title="SMTP name and from email address (example: Pritunl <contact@pritunl.com>)">
+      <input type="email" class="form-control" placeholder="Enter SMTP from address" value="<%- email_from || '' %>" data-toggle="tooltip" title="SMTP from email address">
     </div>
     <div class="email-username form-group">
       <label>SMTP Username</label>
-      <input type="text" class="form-control" placeholder="Enter SMTP username" value="<%- email_username || '' %>">
+      <input type="text" class="form-control" placeholder="Enter SMTP username" value="<%- email_username || '' %>" data-toggle="tooltip" title="SMTP username">
     </div>
     <div class="server-cert form-group">
       <label>Server SSL Certificate</label><br>
@@ -598,11 +618,11 @@
   <div class="settings-right right advanced">
     <div class="email-server form-group">
       <label>SMTP Server</label>
-      <input type="text" class="form-control" placeholder="Enter SMTP server" value="<%- email_server || '' %>">
+      <input type="text" class="form-control" placeholder="Enter SMTP server" value="<%- email_server || '' %>" data-toggle="tooltip" title="SMTP server address and port">
     </div>
     <div class="email-password form-group">
       <label>SMTP Password</label>
-      <input type="password" class="form-control" placeholder="Enter SMTP password" value="<%- email_password %>">
+      <input type="password" class="form-control" placeholder="Enter SMTP password" value="<%- email_password %>" data-toggle="tooltip" title="SMTP password">
     </div>
     <div class="server-key form-group">
       <label>Server SSL Key</label><br>
