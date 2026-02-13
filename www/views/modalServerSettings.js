@@ -29,7 +29,10 @@ define([
         'click .ipv6-toggle': 'onIpv6Select',
         'click .multi-device-toggle': 'onMultiDeviceSelect',
         'click .vxlan-toggle': 'onVxlanSelect',
+        'click .hide-ovpn-toggle': 'onHideOvpnSelect',
+        'click .ovpn-dco-toggle': 'onOvpnDcoSelect',
         'click .dynamic-firewall-toggle': 'onDynamicFirewallSelect',
+        'click .bypass-sso-auth-toggle': 'onBypassSsoAuthSelect',
         'click .geo-sort-toggle': 'onGeoSortSelect',
         'click .force-connect-toggle': 'onForceConnectSelect',
         'click .route-dns-toggle': 'onRouteDnsSelect',
@@ -48,7 +51,7 @@ define([
       return this.template(this.model.toJSON());
     },
     postRender: function() {
-      this.hasWarning = false
+      this.hasWarning = false;
       this.$('.groups input').select2({
         tags: [],
         tokenSeparators: [',', ' '],
@@ -72,7 +75,7 @@ define([
         this.setAlert('danger', 'Using DH Param Bits less then 2048 is ' +
           'not compatible with newer versions of OpenSSL.', '.dh-param-bits');
       } else {
-        this.hasWarning = false
+        this.hasWarning = false;
         this.clearAlert();
       }
     },
@@ -219,29 +222,11 @@ define([
         this.$('.ipv6-toggle .selector').addClass('selected');
         this.$('.ipv6-toggle .selector-inner').show();
 
-        if (dnsServers.indexOf('8.8.4.4') !== -1 &&
-            dnsServers.indexOf('2001:4860:4860::8844') === -1) {
-          dnsServers.unshift('2001:4860:4860::8844');
-        }
-        if (dnsServers.indexOf('8.8.8.8') !== -1 &&
-            dnsServers.indexOf('2001:4860:4860::8888') === -1) {
-          dnsServers.unshift('2001:4860:4860::8888');
-        }
-
         this.$('.ipv6-firewall-toggle').show();
       }
       else {
         this.$('.ipv6-toggle .selector').removeClass('selected');
         this.$('.ipv6-toggle .selector-inner').hide();
-
-        var i = dnsServers.indexOf('2001:4860:4860::8888');
-        if (i !== -1) {
-          dnsServers.splice(i, 1);
-        }
-        i = dnsServers.indexOf('2001:4860:4860::8844');
-        if (i !== -1) {
-          dnsServers.splice(i, 1);
-        }
 
         this.$('.ipv6-firewall-toggle').hide();
       }
@@ -300,6 +285,23 @@ define([
     onHideOvpnSelect: function() {
       this.setHideOvpnSelect(!this.getHideOvpnSelect());
     },
+    getOvpnDcoSelect: function() {
+      return this.$('.ovpn-dco-toggle .selector').hasClass(
+        'selected');
+    },
+    setOvpnDcoSelect: function(state) {
+      if (state) {
+        this.$('.ovpn-dco-toggle .selector').addClass('selected');
+        this.$('.ovpn-dco-toggle .selector-inner').show();
+      }
+      else {
+        this.$('.ovpn-dco-toggle .selector').removeClass('selected');
+        this.$('.ovpn-dco-toggle .selector-inner').hide();
+      }
+    },
+    onOvpnDcoSelect: function() {
+      this.setOvpnDcoSelect(!this.getOvpnDcoSelect());
+    },
     getDynamicFirewallSelect: function() {
       return this.$('.dynamic-firewall-toggle .selector').hasClass(
         'selected');
@@ -316,6 +318,23 @@ define([
     },
     onDynamicFirewallSelect: function() {
       this.setDynamicFirewallSelect(!this.getDynamicFirewallSelect());
+    },
+    getBypassSsoAuthSelect: function() {
+      return this.$('.bypass-sso-auth-toggle .selector').hasClass(
+        'selected');
+    },
+    setBypassSsoAuthSelect: function(state) {
+      if (state) {
+        this.$('.bypass-sso-auth-toggle .selector').addClass('selected');
+        this.$('.bypass-sso-auth-toggle .selector-inner').show();
+      }
+      else {
+        this.$('.bypass-sso-auth-toggle .selector').removeClass('selected');
+        this.$('.bypass-sso-auth-toggle .selector-inner').hide();
+      }
+    },
+    onBypassSsoAuthSelect: function() {
+      this.setBypassSsoAuthSelect(!this.getBypassSsoAuthSelect());
     },
     getGeoSortSelect: function() {
       return this.$('.geo-sort-toggle .selector').hasClass(
@@ -462,7 +481,7 @@ define([
         otpAuth !== this.model.get('otp_auth')
       ) {
         if (!this.hasWarning) {
-          this.hasWarning = true
+          this.hasWarning = true;
           this.setAlert('warning', 'These changes will require users ' +
             'that are not using an official Pritunl client to download ' +
             'their updated profile again before being able to connect. ' +
@@ -470,7 +489,7 @@ define([
             'the changes.');
         }
       } else {
-        this.hasWarning = false
+        this.hasWarning = false;
         this.clearAlert();
       }
     },
@@ -559,7 +578,9 @@ define([
       var protocol = this.$('select.protocol').val();
       var dhParamBits = parseInt(this.$('.dh-param-bits select').val(), 10);
       var hideOvpn = this.getHideOvpnSelect();
+      var ovpnDco = this.getOvpnDcoSelect();
       var dynamicFirewall = this.getDynamicFirewallSelect();
+      var bypassSsoAuth = this.getBypassSsoAuthSelect();
       var geoSort = this.getGeoSortSelect();
       var forceConnect = this.getForceConnectSelect();
       var routeDns = this.getRouteDnsSelect();
@@ -572,6 +593,10 @@ define([
       var interClient = this.getInterClientSelect();
       var pingInterval = parseInt(this.$('.ping-interval input').val(), 10);
       var pingTimeout = parseInt(this.$('.ping-timeout input').val(), 10);
+      var pingIntervalWg = parseInt(this.$(
+        '.ping-interval-wg input').val(), 10);
+      var pingTimeoutWg = parseInt(this.$(
+        '.ping-timeout-wg input').val(), 10);
       var linkPingInterval = parseFloat(
         this.$('.link-ping-interval input').val(), 10);
       var linkPingTimeout = parseFloat(
@@ -605,9 +630,10 @@ define([
       var preConnectMsg = this.$(
         '.pre-connect-msg textarea').val().trim() || null;
       var mssFix =  parseInt(this.$('.mss-fix input').val(), 10) || null;
+      var tunMtu =  parseInt(this.$('.tun-mtu input').val(), 10) || null;
       var multihome = this.getMultihomeSelect();
 
-      this.hasWarning = false
+      this.hasWarning = false;
 
       if (!name) {
         this.setAlert('danger', 'Name can not be empty.', '.name');
@@ -662,7 +688,9 @@ define([
         'restrict_routes': restrictRoutes,
         'wg': wg,
         'hide_ovpn': hideOvpn,
+        'ovpn_dco': ovpnDco,
         'dynamic_firewall': dynamicFirewall,
+        'bypass_sso_auth': bypassSsoAuth,
         'geo_sort': geoSort,
         'force_connect': forceConnect,
         'route_dns': routeDns,
@@ -680,6 +708,8 @@ define([
         'inter_client': interClient,
         'ping_interval': pingInterval,
         'ping_timeout': pingTimeout,
+        'ping_interval_wg': pingIntervalWg,
+        'ping_timeout_wg': pingTimeoutWg,
         'link_ping_interval': linkPingInterval,
         'link_ping_timeout': linkPingTimeout,
         'inactive_timeout': inactiveTimeout,
@@ -692,6 +722,7 @@ define([
         'dns_mapping': dnsMapping,
         'debug': debug,
         'mss_fix': mssFix,
+        'tun_mtu': tunMtu,
         'multihome': multihome,
         'pre_connect_msg': preConnectMsg
       };

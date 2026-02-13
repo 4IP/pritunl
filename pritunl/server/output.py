@@ -47,7 +47,7 @@ class ServerOutput(object):
             doc_ids.append(doc['_id'])
 
         if doc_ids:
-            self.collection.delete_one({
+            self.collection.delete_many({
                 '_id': {'$in': doc_ids},
             })
 
@@ -78,13 +78,12 @@ class ServerOutput(object):
             {'$match': {
                 'server_id': self.server_id,
             }},
-            {'$project': {
-                '_id': False,
-                'timestamp': True,
-                'output': True,
-            }},
             {'$sort': {
                 'timestamp': pymongo.ASCENDING,
+            }},
+            {'$project': {
+                '_id': False,
+                'output': True,
             }},
             {'$group': {
                 '_id': None,

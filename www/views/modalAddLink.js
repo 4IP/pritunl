@@ -73,12 +73,14 @@ define([
     onOk: function() {
       var name = this.$('.name input').val();
       var linkType = this.$('.link-type select').val();
+      var protocol = this.$('.protocol select').val();
       var ipv6 = this.getIpv6Select();
       var hostCheck = this.getHostCheckSelect();
       var linkAction = this.$('.link-action select').val();
       var preferredIke = this.$('.preferred-ike input').val();
       var preferredEsp = this.$('.preferred-esp input').val();
       var forcePreferred = this.getForcePreferredSelect();
+      var wgPort = parseInt(this.$('.wg-port input').val(), 10) || null;
 
       if (!name) {
         this.setAlert('danger', 'Name can not be empty.', '.name');
@@ -90,6 +92,8 @@ define([
       model.save({
         name: name,
         type: linkType,
+        protocol: protocol,
+        wg_port: wgPort,
         ipv6: ipv6,
         host_check: hostCheck,
         action: linkAction,
