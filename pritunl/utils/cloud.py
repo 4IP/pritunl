@@ -2,7 +2,6 @@ from pritunl.exceptions import *
 from pritunl.constants import *
 from pritunl import settings
 from pritunl import utils
-from pritunl import ipaddress
 from pritunl import logger
 
 import requests
@@ -10,6 +9,7 @@ import subprocess
 import hashlib
 import base64
 import hmac
+import ipaddress
 import urllib.parse
 
 def pritunl_cloud_get_metadata():
@@ -95,7 +95,7 @@ def pritunl_cloud_get_routes(metadata=None):
 
     return response.json()
 
-def pritunl_cloud_add_route(dest_network, metadata=None):
+def pritunl_cloud_add_route(dest_network, metadata=None, route_table_ids=None):
     if not metadata:
         metadata = pritunl_cloud_get_metadata()
 

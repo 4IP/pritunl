@@ -13,7 +13,6 @@ from pritunl import event
 from pritunl import messenger
 from pritunl import organization
 from pritunl import iptables
-from pritunl import ipaddress
 from pritunl import plugins
 from pritunl import vxlan
 from pritunl import database
@@ -31,6 +30,7 @@ import pymongo
 import datetime
 import pwd
 import grp
+import ipaddress
 
 _instances = {}
 _instances_lock = threading.Lock()
@@ -438,7 +438,8 @@ class ServerInstance(object):
         else:
             raise ValueError('Unknown protocol')
 
-        if utils.check_openvpn_ver():
+        ovpn_comp = utils.check_openvpn_ver()
+        if ovpn_comp >= 1:
             if self.server.ovpn_dco:
                 server_ciphers = SERVER_CIPHERS_DCO
             else:
@@ -459,8 +460,8 @@ class ServerInstance(object):
             self.server.ping_timeout + 20,
             server_ciphers[self.server.cipher],
             HASHES[self.server.hash],
-            4 if self.server.debug else 1,
-            8 if self.server.debug else 3,
+            6 if self.server.debug else 2,
+            10 if self.server.debug else 4,
         )
 
         unix_user = 'nobody'
@@ -506,11 +507,9 @@ class ServerInstance(object):
 
         if self.server.mss_fix:
             server_conf += 'mssfix %s\n' % self.server.mss_fix
-            server_conf += 'push "mssfix %s"\n' % self.server.mss_fix
 
         if self.server.fragment:
             server_conf += 'fragment %s\n' % self.server.fragment
-            server_conf += 'push "fragment %s"\n' % self.server.fragment
 
         if self.server.multihome:
             server_conf += 'multihome\n'
@@ -522,17 +521,12 @@ class ServerInstance(object):
             server_conf += 'ignore-unknown-option fast-io\n'
             server_conf += 'fast-io\n'
 
-        # Pritunl v0.10.x did not include comp-lzo in client conf
-        # if lzo_compression is adaptive dont include comp-lzo in server conf
-        if self.server.lzo_compression == ADAPTIVE:
-            pass
-        elif self.server.lzo_compression:
-            server_conf += 'comp-lzo yes\npush "comp-lzo yes"\n'
+        server_conf += 'ignore-unknown-option allow-compression\n'
+        server_conf += 'allow-compression no\n'
+        if ovpn_comp >= 2:
+            server_conf += 'compress migrate\n'
         else:
-            server_conf += 'ignore-unknown-option allow-compression\n'
-            server_conf += 'allow-compression no\n'
-            if not self.server.ovpn_dco:
-                server_conf += 'comp-lzo no\npush "comp-lzo no"\n'
+            server_conf += 'comp-lzo no\npush "comp-lzo no"\n'
 
         if push:
             server_conf += push
@@ -813,7 +807,7 @@ class ServerInstance(object):
             if is6:
                 if not interface:
                     for route_net, route_intf in routes6:
-                        if network_obj in route_net:
+                        if network_obj.subnet_of(route_net):
                             interface = route_intf
                             break
 
@@ -829,7 +823,7 @@ class ServerInstance(object):
             else:
                 if not interface:
                     for route_net, route_intf in routes:
-                        if network_obj in route_net:
+                        if network_obj.subnet_of(route_net):
                             interface = route_intf
                             break
 
@@ -995,7 +989,7 @@ class ServerInstance(object):
             if is6:
                 if not interface:
                     for route_net, route_intf in routes6:
-                        if network_obj in route_net:
+                        if network_obj.subnet_of(route_net):
                             interface = route_intf
                             break
 
@@ -1006,12 +1000,12 @@ class ServerInstance(object):
                             'server',
                             server_id=self.server.id,
                             network=network,
-                            )
+                        )
                         interface = default_interface6
             else:
                 if not interface:
                     for route_net, route_intf in routes:
-                        if network_obj in route_net:
+                        if network_obj.subnet_of(route_net):
                             interface = route_intf
                             break
 
@@ -1022,7 +1016,7 @@ class ServerInstance(object):
                             'server',
                             server_id=self.server.id,
                             network=network,
-                            )
+                        )
                         interface = default_interface
 
             nat = route['nat']
@@ -1404,6 +1398,7 @@ class ServerInstance(object):
 
     def init_route_advertisements(self):
         advertise_networks = []
+        advertise_resources = {}
         for route in self.server.get_routes(include_server_links=True):
             advertise = route['advertise']
             vpc_region = route['vpc_region']
@@ -1419,10 +1414,15 @@ class ServerInstance(object):
 
             if advertise or (vpc_region and vpc_id):
                 advertise_networks.append(network)
+                route_resource = route.get('advertise_resource')
+                if route_resource:
+                    advertise_resources[network] = route_resource
 
         if advertise_networks:
             self.reserve_route_advertisement(
-                vpc_region, vpc_id, advertise_networks, initial_load=True)
+                vpc_region, vpc_id, advertise_networks,
+                advertise_resources=advertise_resources,
+                initial_load=True)
 
     def clear_route_advertisements(self):
         for ra_id in self.route_advertisements.copy():
@@ -1432,11 +1432,12 @@ class ServerInstance(object):
             })
 
     def reserve_route_advertisement(self, vpc_region, vpc_id, networks,
-            initial_load=False):
+            advertise_resources=None, initial_load=False):
         cloud_provider = settings.app.cloud_provider
         if not cloud_provider:
             return
 
+        oracle_api_delay = settings.app.oracle_api_delay / 1000
         timestamp_spec = utils.now() - datetime.timedelta(
             seconds=settings.vpn.route_ping_ttl)
 
@@ -1462,13 +1463,20 @@ class ServerInstance(object):
             }}, upsert=True)
 
             for network in networks:
+                resource = None
+                if advertise_resources:
+                    resource = advertise_resources.get(network)
+
                 if cloud_provider == 'aws':
-                    utils.add_vpc_route(network)
+                    utils.add_vpc_route(network,
+                        route_table_ids=resource)
                 elif cloud_provider == 'oracle':
-                    utils.oracle_add_route(network)
-                    time.sleep(0.3)
+                    utils.oracle_add_route(network,
+                        route_table_ids=resource)
+                    time.sleep(oracle_api_delay)
                 elif cloud_provider == 'pritunl':
-                    utils.pritunl_cloud_add_route(network)
+                    utils.pritunl_cloud_add_route(network,
+                        route_table_ids=resource)
                 else:
                     logger.error('Unknown cloud provider type', 'server',
                         cloud_provider=settings.app.cloud_provider,
@@ -1483,7 +1491,7 @@ class ServerInstance(object):
                             utils.add_vpc_route(vxlan_net)
                         elif cloud_provider == 'oracle':
                             utils.oracle_add_route(vxlan_net)
-                            time.sleep(0.3)
+                            time.sleep(oracle_api_delay)
                         elif cloud_provider == 'pritunl':
                             utils.pritunl_cloud_add_route(vxlan_net)
 
@@ -1496,7 +1504,7 @@ class ServerInstance(object):
                             utils.add_vpc_route(vxlan_net6)
                         elif cloud_provider == 'oracle':
                             utils.oracle_add_route(vxlan_net6)
-                            time.sleep(0.3)
+                            time.sleep(oracle_api_delay)
                         elif cloud_provider == 'pritunl':
                             utils.pritunl_cloud_add_route(vxlan_net6)
 
@@ -1782,11 +1790,15 @@ class ServerInstance(object):
         )
 
         if self.server.dh_param_bits < 2048:
-            logger.warning('Using DH params less than 2048 is not '
-                'compatibile with newer versions of OpenSSL',
+            logger.info('Regenerating DH params to 2048 bits',
+                'server',
                 server_id=self.server.id,
                 instance_id=self.id,
             )
+            self.server.dh_param_bits = 2048
+            self.server.commit('dh_param_bits')
+            self.server.queue_dh_params(block=True)
+            event.Event(type=SERVERS_UPDATED)
 
         def timeout():
             logger.error(
@@ -1838,7 +1850,14 @@ class ServerInstance(object):
             if self.server.ovpn_dco:
                 self.state = 'ovpn_dco'
                 try:
-                    utils.check_output_logged([
+                    utils.check_call_silent([
+                        'modprobe',
+                        'ovpn',
+                    ])
+                except:
+                    pass
+                try:
+                    utils.check_call_silent([
                         'modprobe',
                         'ovpn-dco-v2',
                     ])

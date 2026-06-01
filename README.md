@@ -1,8 +1,8 @@
 # pritunl: enterprise vpn server
 
-[![github](https://img.shields.io/badge/github-pritunl-11bdc2.svg?style=flat)](https://github.com/pritunl)
+[![github](https://img.shields.io/badge/github-pritunl-181717.svg?style=flat)](https://github.com/pritunl)
 [![twitter](https://img.shields.io/badge/twitter-pritunl-55acee.svg?style=flat)](https://twitter.com/pritunl)
-[![medium](https://img.shields.io/badge/medium-pritunl-b32b2b.svg?style=flat)](https://pritunl.medium.com)
+[![substack](https://img.shields.io/badge/substack-pritunl-ff6719.svg?style=flat)](https://pritunl.substack.com/)
 [![forum](https://img.shields.io/badge/discussion-forum-ffffff.svg?style=flat)](https://forum.pritunl.com)
 
 [Pritunl](https://github.com/pritunl/pritunl) is a distributed enterprise
@@ -48,11 +48,11 @@ export VERSION="X.XX.XXXX.XX"
 
 sudo dnf -y install gcc git-core wget rsync openssl-devel bzip2-devel libffi-devel sqlite-devel xz-devel zlib-devel selinux-policy selinux-policy-devel policycoreutils-python-utils python3 net-tools openssl iptables ipset ca-certificates psmisc
 
-wget https://www.python.org/ftp/python/3.9.23/Python-3.9.23.tar.xz
-echo "61a42919e13d539f7673cf11d1c404380e28e540510860b9d242196e165709c9 Python-3.9.23.tar.xz" | sha256sum -c - && tar xf Python-3.9.23.tar.xz
-rm Python-3.9.23.tar.xz
+wget https://www.python.org/ftp/python/3.12.13/Python-3.12.13.tgz
+echo "a7438eabd3a48139f42d4e058096af8d880b0bb6e8fb8c78838892e4ce5583f2 Python-3.12.13.tgz" | sha256sum -c - && tar xf Python-3.12.13.tgz
+rm Python-3.12.13.tgz
 
-cd "./Python-3.9.23"
+cd "./Python-3.12.13"
 gcc_major=$(gcc -dumpversion | cut -d. -f1)
 base_cflags="-fstack-protector-strong -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -Werror=format-security -mtune=generic -grecord-gcc-switches"
 if [ "$gcc_major" -ge 7 ]; then
@@ -75,17 +75,16 @@ export CFLAGS_NODIST="$cflags"
 export LDFLAGS_NODIST="$ldflags"
 sudo rm -rf /usr/lib/pritunl
 sudo mkdir /usr/lib/pritunl
-./configure --prefix=/usr --libdir=/usr/lib --enable-optimizations --enable-ipv6 --enable-loadable-sqlite-extensions --disable-shared --with-lto --with-computed-gotos=yes --with-platlibdir=lib
-sudo make DESTDIR="/usr/lib/pritunl" install
-cd ../
-sudo rm -rf ./Python-3.9.23
+./configure --prefix=/usr/lib/pritunl/usr --libdir=/usr/lib/pritunl/usr/lib --enable-optimizations --enable-ipv6 --enable-loadable-sqlite-extensions --disable-shared --with-lto --with-computed-gotos=yes --with-platlibdir=lib
+sudo make ENSUREPIP=no install
 sudo /usr/lib/pritunl/usr/bin/python3 -m ensurepip
-sudo /usr/lib/pritunl/usr/bin/python3 -m pip install pip==23.3.2
+cd ../
+sudo rm -rf ./Python-3.12.13
 
 sudo rm -rf /usr/local/go
-wget https://go.dev/dl/go1.25.5.linux-amd64.tar.gz
-echo "9e9b755d63b36acf30c12a9a3fc379243714c1c6d3dd72861da637f336ebb35b go1.25.5.linux-amd64.tar.gz" | sha256sum -c - && sudo tar -C /usr/local -xf go1.25.5.linux-amd64.tar.gz
-rm -f go1.25.5.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+echo "031f088e5d955bab8657ede27ad4e3bc5b7c1ba281f05f245bcc304f327c987a go1.26.1.linux-amd64.tar.gz" | sha256sum -c - && sudo tar -C /usr/local -xf go1.26.1.linux-amd64.tar.gz
+rm -f go1.26.1.linux-amd64.tar.gz
 
 tee -a ~/.bashrc << 'EOF'
 export GOPATH=$HOME/go
@@ -109,6 +108,7 @@ wget https://github.com/pritunl/pritunl/archive/refs/tags/$VERSION.tar.gz
 tar xf $VERSION.tar.gz
 rm $VERSION.tar.gz
 cd ./pritunl-$VERSION
+sudo /usr/lib/pritunl/usr/bin/pip3 install --require-hashes -r requirements-build.txt
 sudo /usr/lib/pritunl/usr/bin/pip3 install --require-hashes -r requirements.txt
 /usr/lib/pritunl/usr/bin/python3 setup.py build
 sudo /usr/lib/pritunl/usr/bin/python3 setup.py install

@@ -81,6 +81,13 @@ def index_get():
     else:
         return redirect('setup')
 
+@app.route('/login', methods=['GET'])
+def login_get():
+    if setup_state == 'upgrade':
+        return redirect('upgrade')
+    else:
+        return redirect('setup')
+
 @app.route('/setup', methods=['GET'])
 def setup_get():
     if setup_state == 'upgrade':
@@ -205,8 +212,6 @@ def server_thread():
     web_process_state = True
     web_process = subprocess.Popen(
         ['pritunl-web'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
         env=dict(os.environ, **{
             'REVERSE_PROXY_HEADER': '',
             'REVERSE_PROXY_PROTO_HEADER': '',

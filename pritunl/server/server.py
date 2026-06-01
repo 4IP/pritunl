@@ -16,7 +16,6 @@ from pritunl import queue
 from pritunl import event
 from pritunl import messenger
 from pritunl import organization
-from pritunl import ipaddress
 from pritunl import journal
 
 import os
@@ -27,6 +26,7 @@ import datetime
 import base64
 import nacl.utils
 import nacl.public
+import ipaddress
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -713,6 +713,7 @@ class Server(mongo.MongoObject):
         virtual_comment = None
         virtual_metric = None
         virtual_advertise = None
+        virtual_advertise_resource = None
         virtual_vpc_region = None
         virtual_vpc_id = None
 
@@ -752,6 +753,7 @@ class Server(mongo.MongoObject):
                     'nat_interface': None,
                     'nat_netmap': None,
                     'advertise': None,
+                    'advertise_resource': None,
                     'vpc_region': None,
                     'vpc_id': None,
                     'net_gateway': False,
@@ -773,6 +775,7 @@ class Server(mongo.MongoObject):
                 'nat_interface': None,
                 'nat_netmap': None,
                 'advertise': None,
+                'advertise_resource': None,
                 'vpc_region': None,
                 'vpc_id': None,
                 'net_gateway': False,
@@ -800,6 +803,7 @@ class Server(mongo.MongoObject):
                     data['nat_interface'] = route['nat_interface']
                     data['nat_netmap'] = route['nat_netmap']
                     data['advertise'] = None
+                    data['advertise_resource'] = None
                     data['vpc_region'] = None
                     data['vpc_id'] = None
                     data['net_gateway'] = route['net_gateway']
@@ -828,6 +832,8 @@ class Server(mongo.MongoObject):
                     'nat_interface': route.get('nat_interface'),
                     'nat_netmap': route.get('nat_netmap'),
                     'advertise': route.get('advertise', None),
+                    'advertise_resource': route.get(
+                        'advertise_resource', None),
                     'vpc_region': route.get('vpc_region', None),
                     'vpc_id': route.get('vpc_id', None),
                     'net_gateway': route.get('net_gateway', False),
@@ -848,6 +854,8 @@ class Server(mongo.MongoObject):
                         'nat_interface': route.get('nat_interface'),
                         'nat_netmap': route.get('nat_netmap'),
                         'advertise': route.get('advertise'),
+                        'advertise_resource': route.get(
+                            'advertise_resource'),
                         'vpc_region': route.get('vpc_region'),
                         'vpc_id': route.get('vpc_id'),
                         'net_gateway': route.get('net_gateway', False),
@@ -860,6 +868,8 @@ class Server(mongo.MongoObject):
                 virtual_comment = route.get('comment', None)
                 virtual_metric = route.get('metric', None)
                 virtual_advertise = route.get('advertise', None)
+                virtual_advertise_resource = route.get(
+                    'advertise_resource', None)
                 virtual_vpc_region = route.get('vpc_region', None)
                 virtual_vpc_id = route.get('vpc_id', None)
             elif route_network == self.network or \
@@ -883,6 +893,8 @@ class Server(mongo.MongoObject):
                         'metric')
                     routes_dict[route_network]['advertise'] = route.get(
                         'advertise')
+                    routes_dict[route_network]['advertise_resource'] = \
+                        route.get('advertise_resource')
                     routes_dict[route_network]['vpc_region'] = route.get(
                         'vpc_region')
                     routes_dict[route_network]['vpc_id'] = route.get(
@@ -902,6 +914,8 @@ class Server(mongo.MongoObject):
                         'nat_interface': route.get('nat_interface'),
                         'nat_netmap': route.get('nat_netmap'),
                         'advertise': route.get('advertise', None),
+                        'advertise_resource': route.get(
+                            'advertise_resource', None),
                         'vpc_region': route.get('vpc_region', None),
                         'vpc_id': route.get('vpc_id', None),
                         'net_gateway': route.get('net_gateway', False),
@@ -921,6 +935,7 @@ class Server(mongo.MongoObject):
             'nat_interface': None,
             'nat_netmap': None,
             'advertise': virtual_advertise,
+            'advertise_resource': virtual_advertise_resource,
             'vpc_region': virtual_vpc_region,
             'vpc_id': virtual_vpc_id,
             'net_gateway': False,
@@ -941,6 +956,7 @@ class Server(mongo.MongoObject):
                 'nat_interface': None,
                 'nat_netmap': None,
                 'advertise': virtual_advertise,
+                'advertise_resource': virtual_advertise_resource,
                 'vpc_region': virtual_vpc_region,
                 'vpc_id': virtual_vpc_id,
                 'net_gateway': False,
@@ -962,6 +978,7 @@ class Server(mongo.MongoObject):
                 'nat_interface': None,
                 'nat_netmap': None,
                 'advertise': virtual_advertise,
+                'advertise_resource': virtual_advertise_resource,
                 'vpc_region': virtual_vpc_region,
                 'vpc_id': virtual_vpc_id,
                 'net_gateway': False,
@@ -982,6 +999,7 @@ class Server(mongo.MongoObject):
                     'nat_interface': None,
                     'nat_netmap': None,
                     'advertise': virtual_advertise,
+                    'advertise_resource': virtual_advertise_resource,
                     'vpc_region': virtual_vpc_region,
                     'vpc_id': virtual_vpc_id,
                     'net_gateway': False,
@@ -1011,7 +1029,8 @@ class Server(mongo.MongoObject):
             }})
 
     def upsert_route(self, network, nat_route, nat_interface, nat_netmap,
-            advertise, vpc_region, vpc_id, net_gateway, comment, metric):
+            advertise, advertise_resource, vpc_region, vpc_id, net_gateway,
+            comment, metric):
         exists = False
 
         if self.status == ONLINE:
@@ -1050,6 +1069,9 @@ class Server(mongo.MongoObject):
         if not nat_route and nat_netmap:
             raise ServerRouteNonNatNetmap('Cannot use netmap without nat')
 
+        if not advertise:
+            advertise_resource = None
+
         for route in self.routes:
             if route['network'] == network:
                 if not server_link:
@@ -1059,6 +1081,7 @@ class Server(mongo.MongoObject):
                 route['comment'] = comment
                 route['metric'] = metric
                 route['advertise'] = advertise
+                route['advertise_resource'] = advertise_resource
                 route['vpc_region'] = vpc_region
                 route['vpc_id'] = vpc_id
                 route['net_gateway'] = net_gateway
@@ -1075,6 +1098,7 @@ class Server(mongo.MongoObject):
                 'nat_interface': nat_interface,
                 'nat_netmap': nat_netmap,
                 'advertise': advertise,
+                'advertise_resource': advertise_resource,
                 'vpc_region': vpc_region,
                 'vpc_id': vpc_id,
                 'net_gateway': net_gateway,
@@ -1091,6 +1115,7 @@ class Server(mongo.MongoObject):
             'nat_interface': nat_interface,
             'nat_netmap': nat_netmap,
             'advertise': advertise,
+            'advertise_resource': advertise_resource,
             'vpc_region': vpc_region,
             'vpc_id': vpc_id,
             'net_gateway': net_gateway,
@@ -1812,6 +1837,10 @@ class Server(mongo.MongoObject):
             'hosts': [],
         }})
 
+        self.clients_collection.delete_many({
+            'server_id': self.id,
+        })
+
         self.clients_pool_collection.delete_many({
             'server_id': self.id,
         })
@@ -1826,6 +1855,20 @@ class Server(mongo.MongoObject):
             self.publish('force_stop')
         else:
             self.publish('stop')
+
+        self.vxlan_collection.update_one({
+            'server_id': self.id,
+        }, {'$set': {
+            'hosts': [],
+        }})
+
+        self.clients_collection.delete_many({
+            'server_id': self.id,
+        })
+
+        self.clients_pool_collection.delete_many({
+            'server_id': self.id,
+        })
 
     def force_stop(self):
         self.stop(force=True)

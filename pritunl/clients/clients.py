@@ -4,7 +4,6 @@ from pritunl import utils
 from pritunl import mongo
 from pritunl import limiter
 from pritunl import logger
-from pritunl import ipaddress
 from pritunl import settings
 from pritunl import event
 from pritunl import docdb
@@ -33,6 +32,7 @@ import pymongo
 import json
 import datetime
 import random
+import ipaddress
 import nacl.public
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -215,7 +215,7 @@ class Clients(object):
                     client_conf += 'push "dhcp-option DNS %s"\n' % \
                         dns_server
 
-            if has_dns:
+            if has_dns and settings.vpn.domain_route:
                 client_conf += 'push "dhcp-option DOMAIN-ROUTE ."\n'
 
             if self.server.search_domain:
@@ -3085,6 +3085,22 @@ class Clients(object):
         host.global_clients.remove({
             'instance_id': self.instance.id,
         })
+
+        try:
+            doc_ids = []
+            for client in self.clients.find_all():
+                doc_id = client.get('doc_id')
+                if doc_id:
+                    doc_ids.append(doc_id)
+
+            if doc_ids:
+                self.collection.delete_many({
+                    '_id': {'$in': doc_ids},
+                })
+        except:
+            logger.exception('Failed to clean clients', 'clients',
+                client_count=len(doc_ids),
+            )
 
         if self.server.route_clients:
             self.clear_routes()

@@ -7,7 +7,6 @@ from pritunl import logger
 from pritunl import utils
 from pritunl import mongo
 from pritunl import clients
-from pritunl import ipaddress
 from pritunl import monitoring
 from pritunl import database
 from pritunl import plugins
@@ -20,6 +19,7 @@ import socket
 import uuid
 import random
 import bson
+import ipaddress
 
 class ServerInstanceCom(object):
     def __init__(self, svr, instance):
@@ -235,12 +235,16 @@ class ServerInstanceCom(object):
             vpc_region = msg[2]
             vpc_id = msg[3]
             networks = msg[4]
+            advertise_resources = None
+            if len(msg) > 5:
+                advertise_resources = msg[5]
 
             if server_id != self.server.id:
                 return
 
             self.instance.reserve_route_advertisement(
-                vpc_region, vpc_id, networks)
+                vpc_region, vpc_id, networks,
+                advertise_resources=advertise_resources)
         elif event_type == 'route_advertised':
             server_id = msg[1]
             vxlan_addr = msg[2]

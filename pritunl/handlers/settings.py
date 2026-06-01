@@ -7,13 +7,13 @@ from pritunl import journal
 from pritunl import server
 from pritunl import auth
 from pritunl import event
-from pritunl import ipaddress
 from pritunl import server
 from pritunl import organization
 from pritunl import logger
 from pritunl import database
 
 import flask
+import ipaddress
 
 _changes_audit_text = {
     'username': 'Administrator username changed',
@@ -1097,6 +1097,12 @@ def settings_put():
         settings.app.sso_radius_host = None
         settings.app.server_sso_url = None
     else:
+        if not settings.app.server_sso_url:
+            return utils.jsonify({
+                'error': SSO_URL_MISSING,
+                'error_msg': SSO_URL_MISSING_MSG,
+            }, 400)
+
         if RADIUS_AUTH in settings.app.sso and \
                 settings.app.sso_duo_mode == 'passcode':
             return utils.jsonify({

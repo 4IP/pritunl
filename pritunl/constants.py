@@ -477,7 +477,7 @@ UPGRADE_NAME = 'upgrade.html'
 CONF_TEMP_EXT = '.tmp'
 LOG_ARCHIVE_NAME = 'pritunl_log'
 SHUT_DOWN = 'shut_down'
-USER_AGENT = 'Mozilla/5.0 (Python 3.9) Pritunl/1.32'
+USER_AGENT = 'Mozilla/5.0 (Python 3.12) Pritunl/1.32'
 
 CERT_CA = 'ca'
 CERT_SERVER = 'server'
@@ -707,6 +707,9 @@ DEMO_BLOCKED_MSG = 'Not available in demo.'
 
 AUTH_INVALID = 'auth_invalid'
 AUTH_INVALID_MSG = 'Authentication credentials are not valid.'
+
+AUTH_INVALID_USERNAME = 'auth_invalid_username'
+AUTH_INVALID_USERNAME_MSG = 'Authentication username is not valid.'
 
 AUTH_DISABLED = 'auth_disabled'
 AUTH_DISABLED_MSG = 'Authentication credentials are disabled.'
@@ -991,6 +994,9 @@ DUO_USER_INVALID_MSG = 'Username is invalid.'
 SSO_ORG_NULL = 'sso_org_null'
 SSO_ORG_NULL_MSG = 'The SSO organization must be set.'
 
+SSO_URL_MISSING = 'sso_url_missing'
+SSO_URL_MISSING_MSG = 'Missing required single sign-on domain.'
+
 NO_ADMINS_ENABLED = 'no_admins_enabled'
 NO_ADMINS_ENABLED_MSG = 'At least one super administrator must be enabled.'
 
@@ -1168,8 +1174,8 @@ nobind
 persist-tun
 %s
 auth %s
-verb 2
-mute 3
+verb 4
+mute 4
 push-peer-info
 ping %s
 ping-restart %s
@@ -1207,7 +1213,7 @@ OVPN_ONC_NET_CONF = """\
           "Cipher": "%s",
           "ClientCertType": "Ref",
           "ClientCertRef": "%s",
-          "CompLZO": "%s",%s
+          "CompLZO": "false",%s
           "Port": %s,
           "Proto": "%s",
           "PushPeerInfo": true,

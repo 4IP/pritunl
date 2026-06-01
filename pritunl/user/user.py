@@ -7,7 +7,6 @@ from pritunl import utils
 from pritunl import queue
 from pritunl import logger
 from pritunl import messenger
-from pritunl import ipaddress
 from pritunl import sso
 from pritunl import auth
 from pritunl import plugins
@@ -25,6 +24,7 @@ import hmac
 import json
 import uuid
 import pymongo
+import ipaddress
 import urllib.request, urllib.parse, urllib.error
 import requests
 from cryptography.hazmat.backends import default_backend
@@ -1069,7 +1069,6 @@ class User(mongo.MongoObject):
             conf_hash.update(key_remote.encode())
         conf_hash.update(ciphers[svr.cipher].encode())
         conf_hash.update(HASHES[svr.hash].encode())
-        conf_hash.update(str(svr.lzo_compression).encode())
         conf_hash.update(str(svr.tun_mtu).encode())
         conf_hash.update(str(svr.mss_fix).encode())
         conf_hash.update(str(svr.fragment).encode())
@@ -1158,9 +1157,6 @@ class User(mongo.MongoObject):
             svr.ping_timeout,
             settings.vpn.server_poll_timeout,
         )
-
-        if svr.lzo_compression != ADAPTIVE and not svr.ovpn_dco:
-            client_conf += 'comp-lzo no\n'
 
         if svr.tun_mtu:
             client_conf += 'tun-mtu %s\n' % svr.tun_mtu
@@ -1266,7 +1262,6 @@ class User(mongo.MongoObject):
             HASHES[svr.hash],
             ONC_CIPHERS[svr.cipher],
             user_cert_id,
-            'adaptive' if svr.lzo_compression == ADAPTIVE else 'false',
             extra_hosts,
             primary_port,
             svr.protocol,

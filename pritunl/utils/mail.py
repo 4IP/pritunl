@@ -26,22 +26,33 @@ def send_email(to_addr, subject, text_body, html_body):
     msg.attach(email.mime.text.MIMEText(html_body, 'html'))
 
     try:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        if ':' in email_server:
+            email_host, email_port = email_server.rsplit(':', 1)
+            email_port = int(email_port)
+        else:
+            email_host = email_server
+            email_port = 0
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        if settings.app.email_skip_verify:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         if not email_username and not email_password:
-            smtp_conn = smtplib.SMTP(email_server)
+            smtp_conn = smtplib.SMTP(email_host, email_port)
             if settings.app.email_tls:
                 smtp_conn.ehlo()
                 smtp_conn.starttls(context=context)
                 smtp_conn.ehlo()
         else:
             if settings.app.email_tls:
-                smtp_conn = smtplib.SMTP(email_server)
+                smtp_conn = smtplib.SMTP(email_host, email_port)
                 smtp_conn.ehlo()
                 smtp_conn.starttls(context=context)
                 smtp_conn.ehlo()
                 smtp_conn.login(email_username, email_password)
             else:
-                smtp_conn = smtplib.SMTP_SSL(email_server)
+                smtp_conn = smtplib.SMTP_SSL(email_host, email_port)
                 smtp_conn.login(email_username, email_password)
 
         smtp_conn.sendmail(email_from, to_addr, msg.as_string())
