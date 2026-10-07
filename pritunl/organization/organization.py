@@ -2,6 +2,7 @@ from pritunl.constants import *
 from pritunl.exceptions import *
 from pritunl.helpers import *
 from pritunl import settings
+from pritunl import logger
 from pritunl import mongo
 from pritunl import queue
 from pritunl import pooler
@@ -463,7 +464,16 @@ class Organization(mongo.MongoObject):
             if server.status == ONLINE:
                 server.stop()
 
-        server_collection.update_one({
+            try:
+                server.ip_pool.unassign_ip_pool_org(self.id)
+            except:
+                logger.exception('Failed to unassign org ip addresses',
+                    'organization',
+                    org_id=self.id,
+                    server_id=server.id,
+                )
+
+        server_collection.update_many({
             'organizations': self.id,
         }, {'$pull': {
             'organizations': self.id,

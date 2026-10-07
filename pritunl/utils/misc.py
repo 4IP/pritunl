@@ -27,6 +27,7 @@ import psutil
 import urllib.parse
 
 _null = open(os.devnull, 'w')
+_pending_auth_kid = None
 
 if hasattr(sys, 'frozen'):
     _srcfile = 'logging%s__init__%s' % (os.sep, __file__[-4:])
@@ -309,10 +310,22 @@ def filter_path(in_str):
 def generate_secret():
     return generate_secret_len(32)
 
+def generate_secret_lc():
+    return generate_secret_lc_len(32)
+
 def generate_secret_len(n):
     l = int(n*1.3)
     for i in range(10):
         x = re.sub(r'[\W_]+', '', base64.b64encode(
+            os.urandom(l)).decode())[:n]
+        if len(x) == n:
+            return x
+    raise ValueError('Failed to generate secret')
+
+def generate_secret_lc_len(n):
+    l = int(n*2.5)
+    for i in range(10):
+        x = re.sub(r'[^a-z0-9]+', '', base64.b64encode(
             os.urandom(l)).decode())[:n]
         if len(x) == n:
             return x
@@ -534,6 +547,21 @@ def get_url_root():
         url_root = url_root[:-1]
 
     return url_root
+
+def check_auth_supports_kid():
+    global _pending_auth_kid
+    if _pending_auth_kid is None:
+        supported = False
+        try:
+            proc = subprocess.Popen(['openvpn', '--version'],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            ver = proc.communicate()[0].decode().split()[1]
+            major, minor = ver.split('.')[:2]
+            supported = (int(major), int(minor)) >= (2, 6)
+        except:
+            supported = False
+        _pending_auth_kid = supported
+    return _pending_auth_kid
 
 def check_openvpn_ver():
     try:

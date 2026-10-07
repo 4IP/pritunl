@@ -30,6 +30,9 @@ class Administrator(mongo.MongoObject):
         'yubikey_id',
         'otp_auth',
         'otp_secret',
+        'local_otp_auth',
+        'local_otp_code',
+        'local_otp_timestamp',
         'auth_api',
         'token',
         'secret',
@@ -44,8 +47,8 @@ class Administrator(mongo.MongoObject):
     }
 
     def __init__(self, username=None, password=None, default=None,
-            yubikey_id=None, otp_auth=None, auth_api=None, disabled=None,
-            super_user=None, **kwargs):
+            yubikey_id=None, otp_auth=None, local_otp_auth=None, auth_api=None,
+            disabled=None, super_user=None, **kwargs):
         mongo.MongoObject.__init__(self)
         if username is not None:
             self.username = username
@@ -57,6 +60,8 @@ class Administrator(mongo.MongoObject):
             self.yubikey_id = yubikey_id
         if otp_auth is not None:
             self.otp_auth = otp_auth
+        if local_otp_auth is not None:
+            self.local_otp_auth = local_otp_auth
         if auth_api is not None:
             self.auth_api = auth_api
         if disabled is not None:
@@ -72,6 +77,7 @@ class Administrator(mongo.MongoObject):
                 'yubikey_id': 'demo',
                 'otp_auth': self.otp_auth,
                 'otp_secret': self.otp_secret,
+                'local_otp_auth': self.local_otp_auth,
                 'auth_api': self.auth_api,
                 'token': 'demo',
                 'secret': 'demo',
@@ -85,6 +91,7 @@ class Administrator(mongo.MongoObject):
             'yubikey_id': self.yubikey_id,
             'otp_auth': self.otp_auth,
             'otp_secret': self.otp_secret,
+            'local_otp_auth': self.local_otp_auth,
             'auth_api': self.auth_api,
             'token': self.token,
             'secret': self.secret,
@@ -143,6 +150,8 @@ class Administrator(mongo.MongoObject):
 
     def auth_check(self, password, otp_code=None, yubico_key=None,
             remote_addr=None):
+        invalid = False
+
         if not self.test_password(password):
             journal.entry(
                 journal.ADMIN_AUTH_FAILURE,
@@ -151,13 +160,12 @@ class Administrator(mongo.MongoObject):
                 reason=journal.ADMIN_AUTH_REASON_INVALID_PASSWORD,
                 reason_long='Invalid password',
             )
-
             self.audit_event(
                 'admin_auth',
                 'Administrator login failed, invalid password',
                 remote_addr=remote_addr,
             )
-            return False
+            invalid = True
 
         if self.otp_auth and not self.verify_otp_code(otp_code):
             journal.entry(
@@ -167,13 +175,31 @@ class Administrator(mongo.MongoObject):
                 reason=journal.ADMIN_AUTH_REASON_INVALID_OTP,
                 reason_long='Invalid two-factor authentication code',
             )
-
             self.audit_event(
                 'admin_auth',
                 'Administrator login failed, ' +
                     'invalid two-factor authentication code',
                 remote_addr=remote_addr,
             )
+            invalid = True
+
+        if self.local_otp_auth and not self.verify_local_otp_code(otp_code):
+            journal.entry(
+                journal.ADMIN_AUTH_FAILURE,
+                self.journal_data,
+                remote_address=remote_addr,
+                reason=journal.ADMIN_AUTH_REASON_INVALID_LOCAL_OTP,
+                reason_long='Invalid local two-factor authentication code',
+            )
+            self.audit_event(
+                'admin_auth',
+                'Administrator login failed, ' +
+                    'invalid local two-factor authentication code',
+                remote_addr=remote_addr,
+            )
+            invalid = True
+
+        if invalid:
             return False
 
         if self.yubikey_id:
@@ -261,6 +287,37 @@ class Administrator(mongo.MongoObject):
             return False
 
         return True
+
+    def generate_local_otp_code(self):
+        self.local_otp_code = utils.generate_secret_lc()
+        self.local_otp_timestamp = utils.now()
+        self.commit(('local_otp_code', 'local_otp_timestamp'))
+
+    def verify_local_otp_code(self, code):
+        if not code or not self.local_otp_code or not self.local_otp_timestamp:
+            return False
+
+        if not utils.const_compare(self.local_otp_code, code):
+            return False
+
+        if utils.now() - self.local_otp_timestamp > datetime.timedelta(
+                seconds=settings.app.auth_local_otp_ttl):
+            logger.warning(
+                'Admin local two-factor authentication code expired',
+                'auth',
+                local_otp_timestamp=self.local_otp_timestamp,
+            )
+            return False
+
+        response = self.collection.update_one({
+            '_id': self.id,
+            'local_otp_code': code,
+        }, {'$set': {
+            'local_otp_code': None,
+            'local_otp_timestamp': None,
+        }})
+
+        return bool(response.modified_count)
 
     def generate_token(self):
         self.token = utils.generate_secret()
@@ -619,6 +676,24 @@ def reset_password():
 
     return DEFAULT_USERNAME, default_admin.default_password
 
+def generate_local_otp(username):
+    admin = get_by_username(username)
+
+    if not admin:
+        logger.error('Administrator username does not exist', 'auth')
+        return
+
+    if not admin.local_otp_auth:
+        logger.error(
+            'Administrator does not have local two-factor '+
+            'authentication enabled',
+            'auth',
+        )
+
+    admin.generate_local_otp_code()
+
+    return admin.local_otp_code
+
 def disable_admin_api():
     admin_collection = mongo.get_collection('administrators')
     admin_collection.update_many(
@@ -660,11 +735,14 @@ def admin_api_count():
         'auth_api': True,
     })
 
-def super_user_count():
-    return Administrator.collection.count_documents({
+def super_user_count(exclude_id=None):
+    query = {
         'super_user': {'$ne': False},
         'disabled': {'$ne': True},
-    })
+    }
+    if exclude_id:
+        query['_id'] = {'$ne': exclude_id}
+    return Administrator.collection.count_documents(query)
 
 has_default_pass = None
 def has_default_password():

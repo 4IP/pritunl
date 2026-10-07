@@ -106,30 +106,35 @@ def get_interface_address6(iface):
     if addr:
         return addr.split('%')[0]
 
-def get_ip_pool_reverse(network, network_start):
-    ip_pool = network_reverse_hosts(network)
+def get_ip_pool_reverse(network, cursor, network_start=None,
+        network_end=None):
+    ip_pool = network_reverse_hosts(network, network_start, network_end)
 
-    if network_start:
-        network_break = network_start
-
+    if cursor:
         while True:
             try:
                 ip_addr = next(ip_pool)
             except StopIteration:
-                ip_pool = network_reverse_hosts(network)
-                return
+                return network_reverse_hosts(network,
+                    network_start, network_end)
 
-            if ip_addr == network_break:
+            if ip_addr == cursor:
                 break
 
     return ip_pool
 
-def network_reverse_hosts(net):
+def network_reverse_hosts(net, network_start=None, network_end=None):
     cur = int(net.broadcast_address) - 1
-    end = int(net.network_address) + 1
+    if network_end:
+        cur = min(cur, int(ipaddress.IPv4Address(network_end)))
+
+    end = int(net.network_address) + 2
+    if network_start:
+        end = max(end, int(ipaddress.IPv4Address(network_start)))
+
     while cur >= end:
+        yield ipaddress.ip_address(cur)
         cur -= 1
-        yield ipaddress.ip_address(cur + 1)
 
 def ip_to_long(ip_str):
     ip = ip_str.split('.')
@@ -159,8 +164,8 @@ def network_addr(ip, subnet):
         subnet_to_cidr(subnet))
 
 def parse_network(network):
-    address = ipaddress.ip_network(network, strict=False)
-    return str(address.network_address), str(address.netmask)
+    address = ipaddress.ip_interface(network)
+    return str(address.ip), str(address.netmask)
 
 def get_network_gateway(network):
     return str(next(ipaddress.ip_network(network).hosts()))

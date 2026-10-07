@@ -518,6 +518,12 @@ def server_put_post(server_id=None):
         sso_auth_def = True
         sso_auth = True if flask.request.json['sso_auth'] else False
 
+    sso_webauth = False
+    sso_webauth_def = False
+    if 'sso_webauth' in flask.request.json:
+        sso_webauth_def = True
+        sso_webauth = True if flask.request.json['sso_webauth'] else False
+
     mss_fix = None
     mss_fix_def = False
     if 'mss_fix' in flask.request.json:
@@ -707,6 +713,7 @@ def server_put_post(server_id=None):
             search_domain=search_domain,
             otp_auth=otp_auth,
             sso_auth=sso_auth,
+            sso_webauth=sso_webauth,
             cipher=cipher,
             hash=hash,
             block_outside_dns=block_outside_dns,
@@ -822,6 +829,9 @@ def server_put_post(server_id=None):
         if sso_auth_def and svr.sso_auth != sso_auth:
             allow_online = False
             svr.sso_auth = sso_auth
+        if sso_webauth_def and svr.sso_webauth != sso_webauth:
+            allow_online = False
+            svr.sso_webauth = sso_webauth
         if cipher_def and svr.cipher != cipher:
             allow_online = False
             svr.cipher = cipher
@@ -1072,11 +1082,12 @@ def server_route_post(server_id):
 
     svr = server.get_by_id(server_id)
     route_network = flask.request.json['network']
-    comment = flask.request.json.get('comment') or None
+    comment = utils.filter_str(flask.request.json.get('comment')) or None
     metric = flask.request.json.get('metric') or None
     nat_route = True if flask.request.json.get('nat') else False
-    nat_interface = flask.request.json.get('nat_interface') or None
-    nat_netmap = flask.request.json.get('nat_netmap') or None
+    nat_interface = utils.filter_str(
+        flask.request.json.get('nat_interface')) or None
+    nat_netmap = utils.filter_str(flask.request.json.get('nat_netmap')) or None
     advertise = True if flask.request.json.get('advertise') else False
     advertise_resource = flask.request.json.get(
         'advertise_resource') or None
@@ -1148,11 +1159,12 @@ def server_routes_post(server_id):
 
     for route_data in flask.request.json:
         route_network = route_data['network']
-        comment = route_data.get('comment') or None
+        comment = utils.filter_str(route_data.get('comment')) or None
         metric = route_data.get('metric') or None
         nat_route = True if route_data.get('nat') else False
-        nat_interface = route_data.get('nat_interface') or None
-        nat_netmap = route_data.get('nat_netmap') or None
+        nat_interface = utils.filter_str(
+            route_data.get('nat_interface')) or None
+        nat_netmap = utils.filter_str(route_data.get('nat_netmap')) or None
         advertise = True if route_data.get('advertise') else False
         advertise_resource = route_data.get('advertise_resource') or None
         net_gateway = True if route_data.get('net_gateway') else False
@@ -1221,11 +1233,12 @@ def server_route_put(server_id, route_network):
 
     svr = server.get_by_id(server_id)
     route_network = bytes.fromhex(route_network).decode()
-    comment = flask.request.json.get('comment') or None
+    comment = utils.filter_str(flask.request.json.get('comment')) or None
     metric = flask.request.json.get('metric') or None
     nat_route = True if flask.request.json.get('nat') else False
-    nat_interface = flask.request.json.get('nat_interface') or None
-    nat_netmap = flask.request.json.get('nat_netmap') or None
+    nat_interface = utils.filter_str(
+        flask.request.json.get('nat_interface')) or None
+    nat_netmap = utils.filter_str(flask.request.json.get('nat_netmap')) or None
     advertise = True if flask.request.json.get('advertise') else False
     advertise_resource = flask.request.json.get(
         'advertise_resource') or None

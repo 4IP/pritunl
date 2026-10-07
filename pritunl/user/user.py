@@ -785,13 +785,13 @@ class User(mongo.MongoObject):
             return
         for svr in self.org.iter_servers(fields=(
                 'id', 'wg', 'network', 'network_wg', 'network_start',
-                'network_end', 'network_lock')):
+                'network_end', 'network_lock', 'ipv6')):
             svr.assign_ip_addr(self.org.id, self.id)
 
     def unassign_ip_addr(self):
         for svr in self.org.iter_servers(fields=(
                 'id', 'wg', 'network', 'network_wg', 'network_start',
-                'network_end', 'network_lock')):
+                'network_end', 'network_lock', 'ipv6')):
             svr.unassign_ip_addr(self.org.id, self.id)
 
     def generate_otp_secret(self):
@@ -847,8 +847,13 @@ class User(mongo.MongoObject):
         password_mode = None
 
         if svr.bypass_sso_auth:
+            if OTP_PASSCODE in modes:
+                password_mode = 'otp'
             if PIN in modes:
-                password_mode = 'pin'
+                if password_mode:
+                    password_mode += '_pin'
+                else:
+                    password_mode = 'pin'
             return password_mode
 
         if svr.sso_auth:

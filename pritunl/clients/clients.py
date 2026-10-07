@@ -19,6 +19,7 @@ from pritunl import journal
 from pritunl import database
 from pritunl import firewall
 from pritunl import callbacks
+from pritunl import sso
 
 import time
 import collections
@@ -133,8 +134,8 @@ class Clients(object):
 
         client_conf += 'push "ping %s"\n' % self.server.ping_interval
         if settings.app.sso_cache and not self.server.dynamic_firewall and \
-            not self.server.device_auth and \
-            not self.server.sso_auth and settings.user.reconnect:
+                not self.server.device_auth and \
+                not self.server.sso_auth and settings.user.reconnect:
             client_conf += 'push "ping-restart %s"\n' % \
                 self.server.ping_timeout
         elif (user.has_password(self.server) and has_token) or \
@@ -597,8 +598,10 @@ class Clients(object):
             if client_id in self.iroutes_index:
                 for network in self.iroutes_index[client_id]:
                     iroute = self.iroutes.get(network)
+                    if not iroute:
+                        continue
 
-                    if iroute['primary_slaves'] or iroute['primary_slaves']:
+                    if iroute['primary_slaves'] or iroute['secondary_slaves']:
                         return True
             else:
                 return True
@@ -638,23 +641,26 @@ class Clients(object):
                 if doc:
                     orig_virt_address = virt_address
                     virt_address = utils.long_to_ip(doc['_id']) + subnet
+                    doc_static = bool(doc.get('static'))
 
                     response = self.pool_collection.update_one({
                         '_id': doc['_id'],
                         'server_id': self.server.id,
                         'user_id': user_id,
                         'mac_addr': mac_addr,
+                        'client_id': doc.get('client_id'),
                     }, {'$set': {
                         'server_id': self.server.id,
                         'user_id': user_id,
                         'mac_addr': mac_addr,
                         'client_id': doc_id,
                         'timestamp': utils.now(),
-                        'static': True,
+                        'static': doc_static,
                     }})
 
                     if bool(response.modified_count):
                         device_found = True
+                        address_dynamic = not doc_static
                         messenger.publish('instance', [
                             'user_disconnect_id',
                             user_id,
@@ -680,6 +686,7 @@ class Clients(object):
                             'server_id': self.server.id,
                             'user_id': user_id,
                             'mac_addr': mac_addr,
+                            'client_id': doc.get('client_id'),
                         }, {'$set': {
                             'server_id': self.server.id,
                             'user_id': user_id,
@@ -754,10 +761,13 @@ class Clients(object):
                         utils.long_to_ip(last_addr))
 
                 network = ipaddress.IPv4Network(self.server.network)
-                ip_pool = utils.get_ip_pool_reverse(network, last_addr)
+                ip_pool = utils.get_ip_pool_reverse(network, last_addr,
+                    self.server.network_start, self.server.network_end)
 
                 if ip_pool:
+                    last_ip_addr = None
                     for ip_addr in ip_pool:
+                        last_ip_addr = ip_addr
                         try:
                             self.pool_collection.insert_one({
                                 '_id': int(ip_addr._ip),
@@ -781,6 +791,13 @@ class Clients(object):
                         }, {'$set': {
                             'pool_cursor': utils.ip_to_long(
                                 virt_address.split('/')[0]),
+                        }})
+                    elif last_ip_addr is not None:
+                        self.server_collection.update_one({
+                            '_id': self.server.id,
+                            'status': ONLINE,
+                        }, {'$set': {
+                            'pool_cursor': int(last_ip_addr._ip),
                         }})
 
         if not virt_address:
@@ -812,7 +829,7 @@ class Clients(object):
 
         if self.server.multi_device and self.server.max_devices:
             if not virt_address:
-                raise ValueError('Failed to get virtual address')
+                return None, False, False
 
             cur_id = utils.ip_to_long(virt_address.split('/')[0])
             conn_count = 0
@@ -821,11 +838,18 @@ class Clients(object):
                 'user_id': user_id,
             })
 
+            stale_timestamp = utils.now() - datetime.timedelta(
+                seconds=settings.vpn.client_ttl + 10)
+
             for doc in docs:
                 if doc['_id'] == cur_id:
                     continue
 
-                if conn_count > self.server.max_devices:
+                timestamp = doc.get('timestamp')
+                if not timestamp or timestamp < stale_timestamp:
+                    continue
+
+                if conn_count >= self.server.max_devices:
                     messenger.publish('instance', [
                         'user_disconnect_id',
                         user_id,
@@ -1230,7 +1254,7 @@ class Clients(object):
         return True, client_conf
 
     def decrypt_rsa(self, cipher_data):
-        if len(cipher_data) > 1024:
+        if len(cipher_data) > 2048:
             raise ValueError('Sender cipher data too long')
 
         cipher_data = base64.b64decode(cipher_data)
@@ -1258,7 +1282,7 @@ class Clients(object):
         if len(sender_pub_key64) > 128:
             raise ValueError('Sender pub key too long')
 
-        if len(cipher_data64) > 256:
+        if len(cipher_data64) > 512:
             raise ValueError('Sender cipher data too long')
 
         sender_pub_key64 += '=' * (-len(sender_pub_key64) % 4)
@@ -1290,7 +1314,7 @@ class Clients(object):
         if len(sender_pub_key64) > 128:
             raise ValueError('Sender pub key too long')
 
-        if len(cipher_data64) > 256:
+        if len(cipher_data64) > 512:
             raise ValueError('Sender cipher data too long')
 
         sender_pub_key64 += '=' * (-len(sender_pub_key64) % 4)
@@ -1364,6 +1388,9 @@ class Clients(object):
             _, password = password.split('<%=AUTH_TOKEN=%>')
             password = password or None
 
+        if client_data.get('ovpn_sso_token'):
+            sso_token = client_data['ovpn_sso_token']
+
         try:
             if not _limiter.validate(remote_ip):
                 self.instance_com.send_client_deny(client_id, key_id,
@@ -1385,6 +1412,13 @@ class Clients(object):
             if not user:
                 self.instance_com.send_client_deny(client_id, key_id,
                     'User is not valid')
+                return
+
+            if not reauth and self.server.sso_auth and \
+                    self.server.sso_webauth and not user.link_server_id and \
+                    not has_token and not sso_token and \
+                    'webauth' in (client_data.get('iv_sso') or ''):
+                self.sso_webauth_request(client_data, org, user)
                 return
 
             def callback(allow, reason=None, doc_id=None):
@@ -1474,6 +1508,86 @@ class Clients(object):
 
     def connect(self, client_data, reauth=False):
         self.call_queue.put(self._connect, client_data, reauth)
+
+    def sso_webauth_request(self, client_data, org, user):
+        client_id = client_data['client_id']
+        key_id = client_data['key_id']
+
+        state = utils.rand_str(64)
+        token = utils.rand_str(32)
+
+        mongo.get_collection('key_tokens').insert_one({
+            '_id': state,
+            'org_id': org.id,
+            'user_id': user.id,
+            'server_id': self.server.id,
+            'mode': 'ovpn_webauth',
+            'token': token,
+            'type': KEY_REQUEST_AUTH,
+            'secret': None,
+            'timestamp': utils.now(),
+        })
+
+        url = sso.server_sso_url() + '/key/request?state=' + state
+        extra = 'WEB_AUTH::' + url
+
+        logger.info('Sending sso web auth pending challenge', 'clients',
+            user_name=user.name,
+            org_name=org.name,
+            server_name=self.server.name,
+        )
+
+        thread = threading.Thread(
+            name="SsoWebauthPoll",
+            target=self.sso_webauth_poll,
+            args=(client_data, token),
+        )
+        thread.daemon = True
+        thread.start()
+
+        self.instance_com.send_client_pending_auth(client_id, key_id,
+            extra, settings.vpn.sso_webauth_timeout)
+
+    def sso_webauth_poll(self, client_data, token):
+        client_id = client_data['client_id']
+        key_id = client_data['key_id']
+
+        for _ in range(settings.vpn.sso_webauth_timeout * 5):
+            time.sleep(0.2)
+
+            if self.instance.sock_interrupt:
+                return
+
+            if sso.check_token(token, client_data['user_id'], self.server.id):
+                self.sso_webauth_approve(client_data)
+                return
+
+        try:
+            self.instance_com.send_client_deny(client_id, key_id,
+                'Web authentication timed out')
+        except:
+            pass
+
+    def sso_webauth_approve(self, client_data):
+        sso_token = utils.rand_str(32)
+
+        messenger.publish('tokens', 'authorized', extra={
+            'user_id': client_data['user_id'],
+            'server_id': self.server.id,
+            'token': sso_token,
+        })
+
+        tokens_collection = mongo.get_collection('server_sso_tokens')
+        tokens_collection.insert_one({
+            '_id': sso_token,
+            'user_id': client_data['user_id'],
+            'server_id': self.server.id,
+            'stage': 'connect',
+            'timestamp': utils.now(),
+        })
+
+        client_data['ovpn_sso_token'] = sso_token
+        self.call_queue.put(self._connect, client_data, False)
 
     def connect_wg(self, user, org, wg_public_key, auth_password,
             auth_token, auth_nonce, auth_timestamp, sso_token,
@@ -2412,24 +2526,23 @@ class Clients(object):
                     server_id=self.server.id,
                 )
 
-        if self.server.multi_device:
-            if client['address_dynamic']:
-                self.pool_collection.update_one({
-                    'server_id': self.server.id,
-                    'user_id': client.get('user_id'),
-                    'client_id': doc_id,
-                }, {'$set': {
-                    'user_id': None,
-                    'mac_addr': None,
-                    'client_id': None,
-                    'timestamp': None,
-                }})
-            else:
-                self.pool_collection.delete_many({
-                    'server_id': self.server.id,
-                    'user_id': client.get('user_id'),
-                    'client_id': doc_id,
-                })
+        if client['address_dynamic']:
+            self.pool_collection.update_one({
+                'server_id': self.server.id,
+                'user_id': client.get('user_id'),
+                'client_id': doc_id,
+            }, {'$set': {
+                'user_id': None,
+                'mac_addr': None,
+                'client_id': None,
+                'timestamp': None,
+            }})
+        elif self.server.multi_device:
+            self.pool_collection.delete_many({
+                'server_id': self.server.id,
+                'user_id': client.get('user_id'),
+                'client_id': doc_id,
+            })
 
         self.call_queue.put(self._disconnected, client)
 
@@ -2758,7 +2871,8 @@ class Clients(object):
                                     "ping_lost_err")
                             continue
 
-                        if self.server.multi_device:
+                        if self.server.multi_device or \
+                                client['address_dynamic']:
                             response = self.pool_collection.update_one({
                                 'client_id': client['doc_id'],
                             }, {'$set': {
@@ -2812,11 +2926,12 @@ class Clients(object):
                     doc_ids.append(doc_id)
 
             try:
-                self.collection.delete_one({
-                    '_id': {'$in': doc_ids},
-                })
+                if doc_ids:
+                    self.collection.delete_many({
+                        '_id': {'$in': doc_ids},
+                    })
             except:
-                logger.exception('Error removing client', 'server',
+                logger.exception('Error removing clients', 'server',
                     server_id=self.server.id,
                 )
 
@@ -3086,12 +3201,19 @@ class Clients(object):
             'instance_id': self.instance.id,
         })
 
+        doc_ids = []
+        dynamic_doc_ids = []
+        static_doc_ids = []
         try:
-            doc_ids = []
             for client in self.clients.find_all():
                 doc_id = client.get('doc_id')
-                if doc_id:
-                    doc_ids.append(doc_id)
+                if not doc_id:
+                    continue
+                doc_ids.append(doc_id)
+                if client.get('address_dynamic'):
+                    dynamic_doc_ids.append(doc_id)
+                else:
+                    static_doc_ids.append(doc_id)
 
             if doc_ids:
                 self.collection.delete_many({
@@ -3099,6 +3221,29 @@ class Clients(object):
                 })
         except:
             logger.exception('Failed to clean clients', 'clients',
+                client_count=len(doc_ids),
+            )
+
+        try:
+            if dynamic_doc_ids:
+                self.pool_collection.update_many({
+                    'server_id': self.server.id,
+                    'client_id': {'$in': dynamic_doc_ids},
+                }, {'$set': {
+                    'user_id': None,
+                    'mac_addr': None,
+                    'client_id': None,
+                    'timestamp': None,
+                }})
+
+            if static_doc_ids and self.server.multi_device:
+                self.pool_collection.delete_many({
+                    'server_id': self.server.id,
+                    'client_id': {'$in': static_doc_ids},
+                })
+        except:
+            logger.exception('Failed to release client pool', 'clients',
+                server_id=self.server.id,
                 client_count=len(doc_ids),
             )
 

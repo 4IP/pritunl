@@ -113,7 +113,8 @@ def admin_put(admin_id):
     super_user = flask.request.json.get('super_user')
     if super_user is not None:
         if super_user != admin.super_user:
-            if not super_user and auth.super_user_count() < 2:
+            if not super_user and auth.super_user_count(
+                    exclude_id=admin.id) < 1:
                 return utils.jsonify({
                     'error': NO_SUPER_USERS,
                     'error_msg': NO_SUPER_USERS_MSG,
@@ -192,7 +193,8 @@ def admin_put(admin_id):
     disabled = flask.request.json.get('disabled')
     if disabled is not None:
         if disabled != admin.disabled:
-            if disabled and admin.super_user and auth.super_user_count() < 2:
+            if disabled and admin.super_user and auth.super_user_count(
+                    exclude_id=admin.id) < 1:
                 return utils.jsonify({
                     'error': NO_ADMINS_ENABLED,
                     'error_msg': NO_ADMINS_ENABLED_MSG,
@@ -223,7 +225,7 @@ def admin_put(admin_id):
 
             admin.audit_event('admin_updated',
                 'Administrator two-step authentication %s' % (
-                    'disabled' if otp_auth else 'enabled'),
+                    'enabled' if otp_auth else 'disabled'),
                 remote_addr=remote_addr,
             )
 
@@ -231,11 +233,36 @@ def admin_put(admin_id):
                 journal.ADMIN_UPDATE,
                 admin.journal_data,
                 event_long='Administrator two-step authentication %s' % (
-                    'disabled' if otp_auth else 'enabled'),
+                    'enabled' if otp_auth else 'disabled'),
                 remote_addr=remote_addr,
             )
 
         admin.otp_auth = otp_auth
+
+    local_otp_auth = flask.request.json.get('local_otp_auth')
+    if local_otp_auth is not None:
+        if local_otp_auth != admin.local_otp_auth:
+            admin.audit_event('admin_updated',
+                'Administrator local two-step authentication %s' % (
+                    'enabled' if local_otp_auth else 'disabled'),
+                remote_addr=remote_addr,
+            )
+
+            journal.entry(
+                journal.ADMIN_UPDATE,
+                admin.journal_data,
+                event_long='Administrator local two-step authentication %s' % (
+                    'enabled' if local_otp_auth else 'disabled'),
+                remote_addr=remote_addr,
+            )
+
+        admin.local_otp_auth = local_otp_auth
+
+    if admin.otp_auth and admin.local_otp_auth:
+        return utils.jsonify({
+            'error': ADMIN_INVALID_OTP,
+            'error_msg': ADMIN_INVALID_OTP_MSG,
+        }, 400)
 
     otp_secret = flask.request.json.get('otp_secret')
     if otp_secret == True:
@@ -281,10 +308,17 @@ def admin_post():
     yubikey_id = flask.request.json.get('yubikey_id') or None
     yubikey_id = yubikey_id[:12] if yubikey_id else None
     otp_auth = flask.request.json.get('otp_auth', False)
+    local_otp_auth = flask.request.json.get('local_otp_auth', False)
     auth_api = flask.request.json.get('auth_api', False)
     disabled = flask.request.json.get('disabled', False)
     super_user = flask.request.json.get('super_user', False)
     remote_addr = utils.get_remote_addr()
+
+    if otp_auth and local_otp_auth:
+        return utils.jsonify({
+            'error': ADMIN_INVALID_OTP,
+            'error_msg': ADMIN_INVALID_OTP_MSG,
+        }, 400)
 
     try:
         admin = auth.new_admin(
@@ -293,6 +327,7 @@ def admin_post():
             yubikey_id=yubikey_id,
             default=False,
             otp_auth=otp_auth,
+            local_otp_auth=local_otp_auth,
             auth_api=auth_api,
             disabled=disabled,
             super_user=super_user,
@@ -334,7 +369,7 @@ def admin_delete(admin_id):
     admin = auth.get_by_id(admin_id)
     remote_addr = utils.get_remote_addr()
 
-    if admin.super_user and auth.super_user_count() < 2:
+    if admin.super_user and auth.super_user_count(exclude_id=admin.id) < 1:
         return utils.jsonify({
             'error': NO_ADMINS,
             'error_msg': NO_ADMINS_MSG,
